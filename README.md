@@ -24,10 +24,14 @@
 
 - **不需要改固件**：设备刷任意带文件管理器的系统，装一个 APK 即可
 - **唤醒词自己定**：默认「小度同学」，也兼容「小度小度」
+- **中文识别**：服务端接 Qwen3-ASR-1.7B-8bit（oMLX / MLX），支持热词偏置；曲库同音字自动纠正（赵磊→赵雷、话→画）
+- **放歌时也能唤醒**：客户端切到 `VOICE_COMMUNICATION` + 回声消除，只有 TTS 播报时才短暂闭麦
+- **先理解再执行**：点歌、切歌、设备控制先让模型结合上下文解析意图，再调用工具；设备名不确定时先确认，避免误操作
 - **打断**：思考中说话会立刻打断，改听新的一句
 - **上下文**：断线重连后对话记忆还在
 - **音乐**：接本地 Navidrome（Subsonic API），封面/歌词/进度齐全
 - **本地优先**：ASR、LLM、TTS 都指向局域网服务，语音不出内网
+- **在线更新**：APK 发布在 GitHub Releases，App 内可直接检查更新，支持 GitHub 加速前缀
 
 ## 目录
 
@@ -53,7 +57,7 @@ python server/run.py
 
 ### 2. 客户端
 
-推送到 GitHub 后由 Actions 自动构建，产物在 **Actions → build-apk → artifact「XiaoduLink」**。
+推送到 GitHub 后 Actions 自动构建，APK 发布到 Releases 的 `latest`；Actions artifact 仅作备份。
 
 本地构建（需要 JDK 17 + Android SDK）：
 
@@ -76,7 +80,9 @@ bash tools/build_apk.sh
 | `llm` | 大模型（OpenAI 兼容的 `/v1/chat/completions`） |
 | `tts` | 语音合成（edge-tts / OpenAI 兼容 / 本地 VITS） |
 | `music` | Navidrome 地址与账号、缓存策略 |
-| `ha` | Home Assistant（可选） |
+| `ha` | Home Assistant（可选；长期令牌填 `ha.token`） |
+
+ASR 推荐在 oMLX 里加载 `Qwen3-ASR-1.7B-8bit`，中文和方言比 SenseVoice / Whisper turbo 稳；服务端会自动把当前歌曲、最近播放和家里设备名作为热词传给支持 prompt 的模型。
 
 ### 4. Docker（推荐）
 
@@ -100,6 +106,16 @@ HA 长期令牌直接填在 `config/config.yaml` 的 `ha.token`（这个文件�
 > 如果挂载时报 `not a directory` / `Are you trying to mount a directory onto a file`，说明 `config.yaml` 没准备好，Docker 把路径先建成了目录。先按上面的命令生成 `config/config.yaml` 再启动。
 >
 > 如果 `docker pull` 提示 denied，先在宿主机 `docker login ghcr.io`，或在 GitHub 的 Packages 设置里把镜像设为 public。
+
+### 5. 更新
+
+App 内「设置 → 检查更新」会查 GitHub 最新 Release，下载后直接调起安装：
+
+```text
+https://github.com/hanlihanshaobo/xiaodu-x8-llm/releases/tag/latest
+```
+
+下载慢时可在设置里选 GitHub 加速前缀（gh-proxy / ghfast / ghproxy / 自定义），只影响 APK 下载，不影响语音链路。
 
 ## 通信协议
 
@@ -127,6 +143,7 @@ HA 长期令牌直接填在 `config/config.yaml` 的 `ha.token`（这个文件�
 ## 已知限制
 
 - 播放音乐时仍监听唤醒词（切到带回声消除的采集源）；TTS 播报时短暂闭麦
+- Docker 用 bridge 网络时必须设置 `server.public_url`，否则设备会拿到 `172.x` 容器地址
 - 需要一台常开的机器跑服务端；X8 只有 1GB 内存，跑不了模型
 - 首次播放要从曲库下载整首歌到设备，约 2~5 秒
 
