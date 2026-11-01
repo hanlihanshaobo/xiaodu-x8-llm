@@ -185,7 +185,13 @@ public class VoiceService extends Service {
         while (running) {
             try {
                 ws = new Ws();
-                ws.connect(Prefs.server(VoiceService.this), new Ws.Listener() {
+                String url = Prefs.wsUrl(VoiceService.this);
+                if (url.isEmpty()) {
+                    Bus.post("conn", "disconnected|还没配置服务端地址");
+                    Thread.sleep(3000);
+                    continue;
+                }
+                ws.connect(url, new Ws.Listener() {
                     @Override
                     public void onOpen() {
                         connected = true;

@@ -9,7 +9,8 @@ import android.os.Build;
 public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (!Prefs.autoStart(context)) return;
+        if (!Prefs.autoConnect(context)) return;
+        if (Prefs.serverHost(context).isEmpty()) return;
         Intent svc = new Intent(context, VoiceService.class);
         svc.setAction(VoiceService.ACTION_START);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

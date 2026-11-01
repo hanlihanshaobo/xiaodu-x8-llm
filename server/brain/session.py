@@ -88,6 +88,7 @@ class Session:
         self._last_activity = time.time()
         self._turn_started = 0.0
         self._played: list[dict] = []
+        self._music_active = False
 
     # ---------- 基础设施 ----------
 
@@ -159,8 +160,13 @@ class Session:
         elif kind == "speak_done":
             self._pending = max(0, self._pending - 1)
             self._done_evt.set()
-            if self._pending == 0 and not (self._turn_task and not self._turn_task.done()):
-                self._settle_state()
+            if self._pending == 0:
+                if self._music_active:
+                    # 一首歌放完，自动接下一首（不再播报歌名）
+                    self._music_active = False
+                    asyncio.create_task(self._auto_next())
+                elif not (self._turn_task and not self._turn_task.done()):
+                    self._settle_state()
         elif kind == "command":
             await self._on_text_command(str(evt.get("text") or ""))
         elif kind == "ping":
@@ -394,6 +400,7 @@ class Session:
         """放歌与控歌。音频走局域网，播放期间设备不收音，不会把歌当成指令。"""
         cmd = res.get("cmd")
         if cmd == "pause":
+            self._music_active = False
             await self.send({"type": "audio_pause"})
             await self._say(res.get("say") or "好，暂停了。")
             return
@@ -406,18 +413,22 @@ class Session:
             await self._say(res.get("say") or "好的。")
             return
         if cmd == "stop":
+            self._music_active = False
             await self.send({"type": "stop"})
             self._pending = 0
             self._done_evt.set()
             await self._say(res.get("say") or "好，停了。")
             return
         if cmd == "next":
+            self._music_active = False
             await self.send({"type": "stop"})
             self._pending = 0
             self._done_evt.set()
-            res = await self.brain.music.handle("放首歌")
+            await self._auto_next()
+            return
 
         if cmd == "prev":
+            self._music_active = False
             await self.send({"type": "stop"})
             self._pending = 0
             self._done_evt.set()
@@ -452,9 +463,41 @@ class Session:
         self.brain.log_turn(self.remote, query, f"{say}〔播放 {item['title']}〕")
         self.conv_until = time.time() + float(self.cfg.wake.follow_up_seconds)
 
+    async def _auto_next(self) -> None:
+        """自然放完 / 点下一首：直接接一首新的，不播报歌名。"""
+        try:
+            last = self._played[-1]["title"] if self._played else ""
+            res = None
+            for _ in range(3):
+                res = await self.brain.music.handle("放首歌")
+                if not res.get("audio"):
+                    break
+                if res.get("title") != last:
+                    break
+            audio = (res or {}).get("audio")
+            if not audio:
+                self._settle_state()
+                return
+            item = {
+                "path": audio.name,
+                "title": res.get("title", ""),
+                "artist": res.get("artist", ""),
+                "lrc": res.get("lrc", ""),
+                "pic": res.get("pic", ""),
+            }
+            await self._emit_music(item)
+            self._played.append(item)
+            if len(self._played) > 20:
+                self._played.pop(0)
+            log.info("[%s] 自动下一首：%s", self.remote, item["title"])
+        except Exception as e:
+            log.warning("自动下一首失败：%s", e)
+            self._settle_state()
+
     async def _emit_music(self, item: dict) -> None:
         sid = uuid4().hex[:8]
         self._pending += 1
+        self._music_active = True
         self.set_state("speaking")
         await self.send(
             {

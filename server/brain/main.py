@@ -43,6 +43,39 @@ def lan_ip() -> str:
         s.close()
 
 
+def lan_broadcasts() -> list[str]:
+    """本机各网卡所在 /24 的广播地址，用来让设备发现服务端。"""
+    out = {"255.255.255.255"}
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if ip.startswith("127.") or ip.startswith("169.254."):
+                continue
+            parts = ip.split(".")
+            if len(parts) == 4:
+                out.add(".".join(parts[:3]) + ".255")
+    except OSError:
+        pass
+    return sorted(out)
+
+
+async def beacon(port: int, ws_port: int) -> None:
+    """每 3 秒广播一次自己的存在，App 收到后弹出连接确认。"""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    msg = json.dumps({"service": "xiaodu-brain", "port": ws_port}).encode()
+    try:
+        while True:
+            for addr in lan_broadcasts():
+                try:
+                    sock.sendto(msg, (addr, port))
+                except OSError:
+                    pass
+            await asyncio.sleep(3)
+    finally:
+        sock.close()
+
+
 class Brain:
     """进程级共享资源，连接之间复用同一份模型。"""
 
@@ -224,6 +257,7 @@ async def amain(config_path: Path) -> None:
 
     brain = Brain(cfg, public)
     asyncio.create_task(brain.warm_acks())
+    asyncio.create_task(beacon(int(getattr(cfg.server, "discovery_port", 8766)), port))
 
     app = web.Application(client_max_size=8 * 1024 * 1024)
     app["brain"] = brain
