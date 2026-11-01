@@ -41,6 +41,13 @@ _CMD_WORDS = (
     "灯", "空调", "加湿", "热水", "窗帘", "插座", "风扇", "温度", "亮度", "模式",
 )
 
+# 短句里出现这些词，基本是在聊天/提问，不必先跑一次意图解析
+_CHAT_HINTS = (
+    "吗", "呢", "什么", "怎么", "为什么", "哪", "几点", "多少", "谁",
+    "是不是", "能不能", "可以", "天气", "笑话", "故事", "新闻",
+    "时间", "日期", "星期", "你好", "谢谢", "再见",
+)
+
 INTENT_PROMPT = """你是语音助手的意图解析器。根据上下文，把用户最新一句话解析成 JSON，只输出 JSON，不要解释、不要 Markdown。
 可选意图：
 {"intent":"music_play","query":"歌名或歌手"}
@@ -439,6 +446,21 @@ class Session:
             # 带歌名的点歌交给模型：ASR 可能听错，模型能结合上下文纠正
             log.info("[%s] 点歌交给模型理解：%s", self.remote, query)
 
+        # 裸歌名/歌手（“赵磊的话”“水山少年梦”）先查曲库：
+        # 拼音同音字纠错能直接命中，比让模型猜更稳，也更快
+        if music is not None and music.enabled:
+            norm = _norm(query)
+            if not any(w in norm for w in _CHAT_HINTS):
+                try:
+                    looks = await asyncio.get_running_loop().run_in_executor(
+                        None, music.looks_like_song, query)
+                except Exception:
+                    looks = False
+                if looks:
+                    res = await music.play(query)
+                    await self._run_music(res, query, display)
+                    return True
+
         ha = getattr(self.brain, "ha", None)
         ha_on = bool(ha and ha.enabled)
         if ha_on and ha.direct:
@@ -454,6 +476,10 @@ class Session:
     def _looks_like_command(self, query: str) -> bool:
         q = query or ""
         if any(w in q for w in _CMD_WORDS):
+            return True
+        # 短句很像“光说歌名/歌手”的点歌，先让模型判断一下，避免漏掉“赵磊的话”
+        norm = _norm(q)
+        if len(norm) <= 10 and not any(w in norm for w in _CHAT_HINTS):
             return True
         ha = getattr(self.brain, "ha", None)
         if ha is not None and ha.enabled:
@@ -564,6 +590,15 @@ class Session:
         if kind == "music_play" and music_on:
             q = str(data.get("query") or "").strip()
             q = re.sub(r"\s*[-—–]\s*", " ", q).strip()
+            # 模型有时把“赵磊的话”简化成“赵磊”，丢掉歌名；原句里有歌名就用原句，
+            # 交给 music.play 的拼音匹配去纠正同音字。
+            try:
+                _, title = music._split_artist_title(q)
+                _, raw_title = music._split_artist_title(query)
+                if not title and raw_title:
+                    q = query
+            except Exception:
+                pass
             res = await music.play(q)
             await self._run_music(res, query, display)
             return True

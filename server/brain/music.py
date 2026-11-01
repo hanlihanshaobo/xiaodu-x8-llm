@@ -32,6 +32,12 @@ _PREV = ("上一首", "上一曲", "前一首")
 _VOL_UP = ("音量大", "声音大", "大声点", "大点声", "调大声")
 _VOL_DOWN = ("音量小", "声音小", "小声点", "小点声", "调小声")
 
+# 带这些词更像家居/播放控制，不要当歌名去搜
+_HOME_WORDS = (
+    "开", "关", "调", "灯", "空调", "加湿", "热水", "窗帘", "插座",
+    "风扇", "温度", "亮度", "模式", "音量", "暂停", "继续", "下一", "上一", "停",
+)
+
 _PLAY = re.compile(r"^(?:帮我|给我|请|麻烦)?\s*(?:播放|放|来|听)\s*(?:一首|一手|一段|一个|一首歌|首|手|曲|点)?\s*(.*)$")
 _LEAD_PLAY = re.compile(r"^(?:我想听|想听|我要听|要听|播放|放|来|听)\s*")
 _LEAD_UNIT = re.compile(r"^[一首手曲段个支张]\s*")
@@ -101,6 +107,31 @@ class Music:
     def has_song_name(self, query: str) -> bool:
         """带具体歌名的点歌，交给模型先理解，ASR 听错时还能结合上下文纠正。"""
         return bool(self._song_name(query or ""))
+
+    def looks_like_song(self, query: str) -> bool:
+        """判断一句话是不是在说曲库里的歌/歌手（支持同音字）。"""
+        q = (query or "").strip()
+        if not q or not self.enabled:
+            return False
+        if any(w in q for w in _HOME_WORDS):
+            return False
+        artist, title = self._split_artist_title(q)
+        if artist:
+            matched = self._match_artist(artist)
+            if not matched:
+                return False
+            songs = self._songs_by_artist(matched)
+            if not songs:
+                return False
+            if not title:
+                return True
+            return self._match_title(title, songs) is not None
+        if self._match_artist(q):
+            return True
+        try:
+            return bool(self._search(q))
+        except Exception:
+            return False
 
     def tools(self) -> list[dict]:
         return [
