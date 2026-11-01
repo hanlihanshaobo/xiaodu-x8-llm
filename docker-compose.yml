@@ -1,17 +1,39 @@
-# 小度 X8 服务端
-#   1. 复制 server/config.example.yaml 为 server/config.yaml 并填好
-#   2. docker compose up -d --build
+# 小度 X8 服务端（直接使用 GitHub 已发布的多架构镜像）
+#
+# 1Panel 用法：
+#   本文件放到 /opt/1panel/docker/compose/xiaodu-brain/
+#   先在 compose 目录准备配置（二选一）：
+#     a) 从镜像里取模板：
+#        mkdir -p config
+#        docker run --rm --entrypoint cat ghcr.io/hanlihanshaobo/xiaodu-x8-llm:latest \
+#          /app/server/config.example.yaml > config/config.yaml
+#     b) 直接把旧服务器的 server/config.yaml 上传成 config/config.yaml
+#   然后编辑 config/config.yaml（填 ASR / LLM / Navidrome / HA）
+#   最后：docker compose pull && docker compose up -d
+#
+# 注意：config 必须是目录挂载（./config），不要写成不存在的单文件路径，
+# 否则 Docker 会先创建成目录，再报 “not a directory / 挂载文件到目录”。
 services:
   xiaodu-brain:
-    build: .
-    image: xiaodu-x8-llm:latest
+    image: ghcr.io/hanlihanshaobo/xiaodu-x8-llm:latest
+    # 想本地从源码构建时：注释掉 image，取消下一行
+    # build: .
     container_name: xiaodu-brain
     restart: unless-stopped
-    ports:
-      - "8765:8765"
+    command: ["python", "server/run.py", "-c", "/app/config/config.yaml"]
+
+    # Linux / 1Panel 推荐 host 网络：
+    #   - 设备 UDP 8766 自动发现能用
+    #   - 容器里探测到的局域网 IP 就是宿主机 IP，音频地址不会指到容器内网
+    network_mode: host
+
+    # 如果必须用 bridge 网络：注释掉上面的 network_mode，启用下面的 ports，
+    # 并且把 config.yaml 里的 server.public_url 改成 http://<Docker宿主机局域网IP>:8765
+    # ports:
+    #   - "8765:8765"
+    #   - "8766:8766/udp"
+
     volumes:
-      - ./server/config.yaml:/app/server/config.yaml:ro
+      - ./config:/app/config:ro
       - ./data/cache:/app/server/cache
       - ./data/logs:/app/server/logs
-    # 需要访问局域网里的 ASR/LLM/TTS/Navidrome/HA，用 host 网络时更省事
-    # network_mode: host

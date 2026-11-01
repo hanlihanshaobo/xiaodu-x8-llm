@@ -78,20 +78,26 @@ bash tools/build_apk.sh
 | `music` | Navidrome 地址与账号、缓存策略 |
 | `ha` | Home Assistant（可选） |
 
-### 4. Docker（可选）
+### 4. Docker（推荐）
 
-镜像同时支持 `linux/amd64`、`linux/arm64`、`linux/arm/v7`（32 位 ARM），拉取时会自动选对应架构：
+镜像同时支持 `linux/amd64`、`linux/arm64`、`linux/arm/v7`（32 位 ARM），拉取时会自动选对应架构。仓库根目录的 `docker-compose.yml` 已经改成直接使用已发布镜像，不再本地构建：
 
 ```bash
-docker run -d --name xiaodu-brain \
-  -p 8765:8765 -p 8766:8766/udp \
-  -v "$PWD/server/config.yaml:/app/server/config.yaml:ro" \
-  -v "$PWD/server/cache:/app/server/cache" \
-  -v "$PWD/server/logs:/app/server/logs" \
-  ghcr.io/hanlihanshaobo/xiaodu-x8-llm:latest
+mkdir -p config
+docker run --rm --entrypoint cat ghcr.io/hanlihanshaobo/xiaodu-x8-llm:latest \
+  /app/server/config.example.yaml > config/config.yaml
+# 编辑 config/config.yaml，填 ASR / LLM / Navidrome / HA
+docker compose pull
+docker compose up -d
 ```
 
-注意：`config.yaml` 里的 `public_url` 要填宿主机在局域网里的地址（比如 `http://192.168.1.10:8765`），不能填容器 IP，否则设备下载不到音频。UDP 8766 用于服务端自动发现；Linux/NAS 上如果自动发现失败，把 `-p ...` 换成 `--network host` 再试。
+1Panel 用法：把 `docker-compose.yml` 放到 `/opt/1panel/docker/compose/xiaodu-brain/`，配置放在同目录的 `config/config.yaml`。
+
+`docker-compose.yml` 默认 `network_mode: host`：设备 UDP 自动发现和音频地址都正常。如果必须用 bridge，启用 `ports`，并把 `config.yaml` 里的 `server.public_url` 改成 `http://<Docker宿主机IP>:8765`。
+
+> 如果挂载时报 `not a directory` / `Are you trying to mount a directory onto a file`，说明 `config.yaml` 没准备好，Docker 把路径先建成了目录。先按上面的命令生成 `config/config.yaml` 再启动。
+>
+> 如果 `docker pull` 提示 denied，先在宿主机 `docker login ghcr.io`，或在 GitHub 的 Packages 设置里把镜像设为 public。
 
 ## 通信协议
 
