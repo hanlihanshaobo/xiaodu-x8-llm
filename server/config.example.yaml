@@ -39,10 +39,10 @@ asr:
   openai:
     base_url: "http://<MODEL_IP>:8000/v1"
     api_key: ""
-    model: "SenseVoiceSmall"       # mlx-community/SenseVoiceSmall，中文最准
+    model: "SenseVoiceSmall"       # 装了 Qwen3-ASR-1.7B-8bit 的话优先用它，中文更准
     language: "zh"
-    # 热词偏置：Whisper 会参考这段文字，减少"小度"被听成"小杜"之类的错误
-    prompt: "小度小度，小度同学，你好小度。常见说法：今天天气怎么样，打开客厅灯，关掉空调，音量调小一点，放首歌，几点了，设个闹钟，我回来了。"
+    # 热词偏置：Qwen3-ASR 会参考这段文字；太长会在静音时被复读，保持短
+    prompt: "小度同学。常见词：开灯、关灯、放歌、下一首、暂停、继续、音量、空调、加湿器。"
     timeout: 20
   local:
     model_dir: "C:/LLM/models/sense-voice"

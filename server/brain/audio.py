@@ -9,6 +9,7 @@ VAD 始终在本地跑：它只是判断"说完了没有"，0.6MB 的模型，�
 """
 from __future__ import annotations
 
+import difflib
 import io
 import json
 import logging
@@ -161,7 +162,6 @@ class OpenAIASR:
         prompt = "\n".join(x for x in (self.prompt, self.hint) if x).strip()
         if prompt:
             fields["prompt"] = prompt
-
         body = b""
         for k, v in fields.items():
             body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode()
@@ -189,10 +189,26 @@ class OpenAIASR:
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            return raw.strip()
+            return self._not_echo(raw.strip(), prompt)
         if isinstance(data, dict):
-            return str(data.get("text") or data.get("transcription") or "").strip()
+            text = str(data.get("text") or data.get("transcription") or "").strip()
+            return self._not_echo(text, prompt)
         return ""
+
+    @staticmethod
+    def _not_echo(text: str, prompt: str) -> str:
+        """Qwen3-ASR 在静音/极短音频上可能把 prompt 整段复读出来，这里丢掉。"""
+        t = (text or "").strip()
+        p = (prompt or "").strip()
+        if len(t) < 16 or len(p) < 16:
+            return t
+        if t in p:
+            log.info("ASR 复读了提示词，丢弃：%s", t[:40])
+            return ""
+        if difflib.SequenceMatcher(None, t, p).ratio() > 0.6:
+            log.info("ASR 疑似复读提示词，丢弃：%s", t[:40])
+            return ""
+        return t
 
 
 class LocalASR:

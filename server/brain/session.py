@@ -311,7 +311,7 @@ class Session:
     def _asr_hint(self) -> str:
         """给支持 prompt 的 ASR 模型做热词偏置：当前/最近歌曲 + 家里设备名。"""
         parts: list[str] = []
-        for item in self._played[-5:]:
+        for item in self._played[-3:]:
             title = item.get("title") or ""
             artist = item.get("artist") or ""
             if title:
@@ -319,12 +319,12 @@ class Session:
         ha = getattr(self.brain, "ha", None)
         if ha is not None and ha.enabled:
             try:
-                parts.extend(ha.labels()[:30])
+                parts.extend(ha.labels()[:20])
             except Exception:
                 pass
         if not parts:
             return ""
-        return ("热词：" + "、".join(parts))[:400]
+        return "、".join(parts)[:120]
 
     async def _on_segment(self, samples) -> None:
         if self.brain.asr is None:
