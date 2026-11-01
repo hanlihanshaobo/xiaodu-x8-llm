@@ -143,12 +143,39 @@ class Music:
     async def _materialize(self, song: dict) -> dict | None:
         """把一首歌落到本地：取直链 → 下载 → 歌词 → 封面"""
         loop = asyncio.get_running_loop()
+
+        # 自动档：如果之前已经补过 320k，直接用高码率
+        if self.quality == "auto" and song["provider"] == "navidrome":
+            p320 = self.cache / (self._cache_key(song, "320") + ".mp3")
+            if p320.exists() and p320.stat().st_size > 100_000:
+                return await self._finish_item(song, p320)
+
         url = await loop.run_in_executor(None, self._stream_url, song)
         if not url:
             return None
         path = await loop.run_in_executor(None, self._download, url, song)
         if path is None:
             return None
+        if self.quality == "auto" and song["provider"] == "navidrome":
+            asyncio.create_task(self._upgrade(song))
+        return await self._finish_item(song, path)
+
+    async def _upgrade(self, song: dict) -> None:
+        """后台补一份 320k，下一轮播放同一首歌就能用上"""
+        loop = asyncio.get_running_loop()
+        try:
+            dst = self.cache / (self._cache_key(song, "320") + ".mp3")
+            if dst.exists() and dst.stat().st_size > 100_000:
+                return
+            url = await loop.run_in_executor(None, lambda: self._nd_stream(song["ref"], "320"))
+            ok = await loop.run_in_executor(None, self._download_to, url, dst)
+            if ok:
+                log.info("已补高码率：%s", song["title"])
+        except Exception as e:
+            log.info("补高码率失败：%s", e)
+
+    async def _finish_item(self, song: dict, path) -> dict:
+        loop = asyncio.get_running_loop()
         lrc = ""
         if song.get("lyric_ref") or song["provider"] == "navidrome":
             lrc = await loop.run_in_executor(None, self._lyric, song)
@@ -334,18 +361,26 @@ class Music:
         self.quality = q
         self._pool.clear()
         log.info("音质切换为 %s，预加载池已清空", q)
+        try:
+            asyncio.get_running_loop().create_task(self._refill_pool())
+        except RuntimeError:
+            pass
 
-    def _nd_stream(self, sid: str) -> str:
+    def _cache_key(self, song: dict, quality: str) -> str:
+        return hashlib.md5(f"{song['provider']}-{song['ref']}-{quality}".encode()).hexdigest()[:16]
+
+    def _nd_stream(self, sid: str, quality: str | None = None) -> str:
+        q = quality or self.quality
         # 让 Navidrome 按当前音质转码；original 不转，直接给源文件
         params = {**self._nd_params(), "id": sid}
-        if self.quality == "original":
+        if q == "original":
             pass
-        elif self.quality == "auto":
+        elif q == "auto":
             params["format"] = "mp3"
             params["maxBitRate"] = "128"      # 先低码率，保证秒开
         else:
             params["format"] = "mp3"
-            params["maxBitRate"] = self.quality
+            params["maxBitRate"] = q
         return f"{self.nd_url}/rest/stream.view?{urllib.parse.urlencode(params)}"
 
     def _nd_lyric(self, sid: str) -> str:
@@ -520,7 +555,7 @@ class Music:
     # ---------- 下载与缓存 ----------
 
     def _download(self, url: str, song: dict) -> Path | None:
-        key = hashlib.md5(f"{song['provider']}-{song['ref']}-{self.quality}".encode()).hexdigest()[:16]
+        key = self._cache_key(song, self.quality)
         if song["provider"] == "navidrome":
             if self.quality == "original" and song.get("suffix"):
                 ext = "." + song["suffix"]
@@ -552,6 +587,25 @@ class Music:
             log.warning("下载失败：%s", e)
             path.unlink(missing_ok=True)
             return None
+
+    def _download_to(self, url: str, path: Path) -> bool:
+        """下到指定路径，返回是否成功"""
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=120) as r, open(path, "wb") as f:
+                while True:
+                    chunk = r.read(256 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+            if path.stat().st_size < 100_000:
+                path.unlink(missing_ok=True)
+                return False
+            return True
+        except Exception as e:
+            log.info("下载失败：%s", e)
+            path.unlink(missing_ok=True)
+            return False
 
     def _download_pic(self, url: str, key: str) -> Path | None:
         path = self.cache / f"{key}.jpg"

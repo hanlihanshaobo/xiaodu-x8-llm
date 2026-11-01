@@ -257,6 +257,7 @@ async def amain(config_path: Path) -> None:
 
     brain = Brain(cfg, public)
     asyncio.create_task(brain.warm_acks())
+    asyncio.create_task(brain.music.warm())
     asyncio.create_task(beacon(int(getattr(cfg.server, "discovery_port", 8766)), port))
 
     app = web.Application(client_max_size=8 * 1024 * 1024)
