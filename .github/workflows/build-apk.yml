@@ -53,13 +53,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: "最新构建 · ${{ github.run_number }}"
+          name: "小度换脑 v1.0.${{ github.run_number }}"
           body: |
-            自动构建 #${{ github.run_number }}
-            提交：${{ github.sha }}
-            时间：${{ github.event.head_commit.timestamp }}
+            **小度换脑** 自动构建 `v1.0.${{ github.run_number }}`
 
-            App 内「设置 → 检查更新」可以直接下载安装。
+            - 提交：`${{ github.sha }}`
+            - 时间：${{ github.event.head_commit.timestamp }}
+
+            安装方式：App 内「设置 → 检查更新」，或直接下载下面的 APK。
           files: dist/XiaoduLink.apk
           make_latest: true
 

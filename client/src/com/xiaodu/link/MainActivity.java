@@ -2,8 +2,7 @@ package com.xiaodu.link;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.AlertDialog;
-import android.content.DialogInterface;
+import android.app.Dialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -249,6 +248,14 @@ public class MainActivity extends Activity implements Bus.Listener {
         b.setPadding(dp(18), dp(6), dp(18), dp(6));
         b.setMinWidth(0);
         b.setMinimumWidth(0);
+        b.setMinHeight(0);
+        b.setMinimumHeight(0);
+        // 去掉默认的阴影/涟漪残留，那个小点就是它
+        b.setStateListAnimator(null);
+        b.setElevation(0);
+        b.setBackgroundTintList(null);
+        b.setForeground(null);
+        b.setDefaultFocusHighlightEnabled(false);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.rightMargin = dp(10);
@@ -270,6 +277,16 @@ public class MainActivity extends Activity implements Bus.Listener {
         assistantView.setGravity(Gravity.CENTER);
 
         ring = new RingView(this);
+        ring.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                VoiceService svc = VoiceService.INSTANCE;
+                if (svc != null) svc.stopPlayback();   // 本地立即停，同时通知服务端别再续播
+                setStatus("已停止");
+                subtitle.setText("");
+                Toast.makeText(MainActivity.this, "已停止播放", Toast.LENGTH_SHORT).show();
+            }
+        });
         assistantView.addView(ring, new LinearLayout.LayoutParams(dp(250), dp(250)));
 
         status = new TextView(this);
@@ -450,6 +467,13 @@ public class MainActivity extends Activity implements Bus.Listener {
         b.setPadding(dp(14), dp(4), dp(14), dp(4));
         b.setMinWidth(0);
         b.setMinimumWidth(0);
+        b.setMinHeight(0);
+        b.setMinimumHeight(0);
+        b.setStateListAnimator(null);
+        b.setElevation(0);
+        b.setBackgroundTintList(null);
+        b.setForeground(null);
+        b.setDefaultFocusHighlightEnabled(false);
         b.setOnClickListener(l);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -795,20 +819,17 @@ public class MainActivity extends Activity implements Bus.Listener {
                             return;
                         }
                         final String target = Updater.proxied(MainActivity.this, url);
-                        dialog()
-                                .setTitle("发现新版本")
-                                .setMessage(message + "\n\n下载地址：\n" + target)
-                                .setPositiveButton("下载并安装", new DialogInterface.OnClickListener() {
+                        showCard("发现新版本", message + "\n\n下载地址：\n" + target,
+                                new String[]{"稍后", "下载并安装"},
+                                new Runnable[]{null, new Runnable() {
                                     @Override
-                                    public void onClick(DialogInterface d, int w) {
+                                    public void run() {
                                         Prefs.setUpdateId(MainActivity.this, id);
                                         Updater.downloadAndInstall(MainActivity.this, target);
                                         Toast.makeText(MainActivity.this, "开始下载，完成后会弹出安装",
                                                 Toast.LENGTH_LONG).show();
                                     }
-                                })
-                                .setNegativeButton("稍后", null)
-                                .show();
+                                }});
                     }
                 });
             }
@@ -825,21 +846,18 @@ public class MainActivity extends Activity implements Bus.Listener {
                     @Override
                     public void run() {
                         final String addr = host + ":" + port;
-                        dialog()
-                                .setTitle("发现服务端")
-                                .setMessage("地址：" + addr + "\n是否连接并记住？")
-                                .setPositiveButton("连接", new DialogInterface.OnClickListener() {
+                        showCard("发现服务端", "地址：" + addr + "\n是否连接并记住？",
+                                new String[]{"取消", "连接"},
+                                new Runnable[]{null, new Runnable() {
                                     @Override
-                                    public void onClick(DialogInterface d, int w) {
+                                    public void run() {
                                         Prefs.setServerHost(MainActivity.this, addr);
                                         Prefs.setAutoConnect(MainActivity.this, true);
                                         restartVoice();
                                         showTab(0);
                                         setStatus("正在连接…");
                                     }
-                                })
-                                .setNegativeButton("取消", null)
-                                .show();
+                                }});
                     }
                 });
             }
@@ -1078,49 +1096,147 @@ public class MainActivity extends Activity implements Bus.Listener {
 
     // ---------------- 接管麦克风 ----------------
 
-    private AlertDialog.Builder dialog() {
-        // 对话框跟着主题走，否则浅色模式会把深色文字画在深色背景上
-        int theme = dark ? android.R.style.Theme_DeviceDefault_Dialog_Alert
-                : android.R.style.Theme_DeviceDefault_Light_Dialog_Alert;
-        return new AlertDialog.Builder(this, theme);
+    private Dialog card;
+
+    /** 自定义圆角卡片弹窗：底色和文字都跟主题走，避免系统对话框在浅色下看不清 */
+    private void showCard(String title, CharSequence body, String[] labels, Runnable[] actions) {
+        TextView tv = new TextView(this);
+        tv.setText(body);
+        tv.setTextColor(cSub);
+        tv.setTextSize(16);
+        tv.setLineSpacing(dp(6), 1f);
+        showCardView(title, tv, labels, actions);
+    }
+
+    /** 标题 + 任意内容 + 一排按钮，按钮从右到左依次是主操作、次操作… */
+    private void showCardView(String title, View body, String[] labels, final Runnable[] actions) {
+        if (card != null && card.isShowing()) card.dismiss();
+
+        final Dialog d = new Dialog(this, android.R.style.Theme_DeviceDefault_Dialog_NoActionBar);
+        d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(26), dp(22), dp(26), dp(18));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(cCard);
+        bg.setCornerRadius(dp(20));
+        bg.setStroke(Math.max(1, (int) dp(1)), cLine);
+        box.setBackground(bg);
+
+        TextView t = new TextView(this);
+        t.setText(title);
+        t.setTextColor(cText);
+        t.setTextSize(21);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        box.addView(t);
+
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        blp.topMargin = dp(12);
+        box.addView(body, blp);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.END);
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        rlp.topMargin = dp(20);
+        box.addView(row, rlp);
+
+        for (int i = 0; i < labels.length; i++) {
+            final int idx = i;
+            Button b = cardButton(labels[i], i == labels.length - 1);
+            b.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    d.dismiss();
+                    if (actions != null && idx < actions.length && actions[idx] != null) {
+                        actions[idx].run();
+                    }
+                }
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            if (i > 0) lp.leftMargin = dp(10);
+            row.addView(b, lp);
+        }
+
+        d.setContentView(box);
+        d.setCanceledOnTouchOutside(true);
+        android.view.Window w = d.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            WindowManager.LayoutParams lp = w.getAttributes();
+            lp.dimAmount = 0.45f;
+            w.setAttributes(lp);
+        }
+        card = d;
+        d.show();
+        if (w != null) {
+            int width = Math.min((int) (getResources().getDisplayMetrics().widthPixels * 0.68f),
+                    (int) dp(680));
+            w.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
+    private Button cardButton(String text, boolean primary) {
+        Button b = new Button(this);
+        b.setText(text);
+        b.setTextSize(16);
+        b.setAllCaps(false);
+        b.setTextColor(primary ? Color.WHITE : cText);
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(primary ? cAccent : cBg);
+        g.setCornerRadius(dp(22));
+        if (!primary) g.setStroke(Math.max(1, (int) dp(1)), cLine);
+        b.setBackground(g);
+        b.setPadding(dp(20), dp(9), dp(20), dp(9));
+        b.setMinWidth(0);
+        b.setMinimumWidth(0);
+        b.setMinHeight(0);
+        b.setMinimumHeight(0);
+        b.setStateListAnimator(null);
+        b.setElevation(0);
+        b.setBackgroundTintList(null);
+        b.setForeground(null);
+        b.setDefaultFocusHighlightEnabled(false);
+        return b;
     }
 
     private void showTakeover() {
-        TextView text = new TextView(this);
-        text.setTextSize(19);
-        text.setPadding(dp(20), dp(16), dp(20), dp(8));
-        text.setLineSpacing(dp(6), 1f);
-        text.setText("关掉原生小度的唤醒，这里才能独占麦克风。\n\n"
+        String body = "关掉原生小度的唤醒，这里才能独占麦克风。\n\n"
                 + "最简单的办法：按一下机器顶部的麦克风静音键。\n\n"
                 + "其它办法：\n"
                 + "· 屏幕顶部下拉 → 禁用唤醒\n"
                 + "· 设置 → 隐私 → 语音唤醒 → 关闭\n"
-                + "· 或点「选择应用」，关掉小度的麦克风权限");
+                + "· 或点「选择应用」，关掉小度的麦克风权限";
 
-        dialog()
-                .setTitle("接管麦克风")
-                .setView(text)
-                .setPositiveButton("选择应用", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface d, int w) {
-                        Prefs.setShownTakeover(MainActivity.this);
-                        showPackagePicker();
-                    }
-                })
-                .setNeutralButton("隐私设置", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface d, int w) {
-                        Prefs.setShownTakeover(MainActivity.this);
-                        openPrivacySettings();
-                    }
-                })
-                .setNegativeButton("知道了", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface d, int w) {
-                        Prefs.setShownTakeover(MainActivity.this);
-                    }
-                })
-                .show();
+        showCard("接管麦克风", body,
+                new String[]{"知道了", "隐私设置", "选择应用"},
+                new Runnable[]{
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                Prefs.setShownTakeover(MainActivity.this);
+                            }
+                        },
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                Prefs.setShownTakeover(MainActivity.this);
+                                openPrivacySettings();
+                            }
+                        },
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                Prefs.setShownTakeover(MainActivity.this);
+                                showPackagePicker();
+                            }
+                        }
+                });
     }
 
     private void showPackagePicker() {
@@ -1129,18 +1245,29 @@ public class MainActivity extends Activity implements Bus.Listener {
             openPrivacySettings();
             return;
         }
-        String[] names = new String[list.size()];
-        for (int i = 0; i < list.size(); i++) names[i] = list.get(i)[1] + "\n" + list.get(i)[0];
-        dialog()
-                .setTitle("选择要关闭的应用")
-                .setItems(names, new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface d, int which) {
-                        openAppInfo(list.get(which)[0]);
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .show();
+
+        LinearLayout apps = new LinearLayout(this);
+        apps.setOrientation(LinearLayout.VERTICAL);
+        for (int i = 0; i < list.size(); i++) {
+            final String pkg = list.get(i)[0];
+            final String label = list.get(i)[1];
+            TextView row = new TextView(this);
+            row.setText(label + "\n" + pkg);
+            row.setTextSize(16);
+            row.setTextColor(cText);
+            row.setLineSpacing(dp(3), 1f);
+            row.setPadding(dp(2), dp(12), dp(2), dp(12));
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (card != null) card.dismiss();
+                    openAppInfo(pkg);
+                }
+            });
+            apps.addView(row);
+        }
+
+        showCardView("选择要关闭的应用", apps, new String[]{"取消"}, new Runnable[]{null});
     }
 
     private java.util.List<String[]> findCandidates() {

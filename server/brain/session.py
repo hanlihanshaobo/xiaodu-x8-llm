@@ -163,6 +163,17 @@ class Session:
             )
         elif kind == "interrupt":
             await self._interrupt()
+        elif kind == "stop":
+            # 界面点“停止播放”：立刻停，且不能让服务端自动接下一首
+            self._pending = 0
+            self._music_active = False
+            self._next_item = None
+            self._done_evt.set()
+            if self._turn_task and not self._turn_task.done():
+                self._turn_task.cancel()
+            if self.vad is not None:
+                self.vad.reset()
+            self._settle_state()
         elif kind == "speak_done":
             self._pending = max(0, self._pending - 1)
             self._done_evt.set()
