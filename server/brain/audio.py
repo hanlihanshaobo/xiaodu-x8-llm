@@ -145,16 +145,22 @@ class OpenAIASR:
         self.model = str(cfg.model)
         self.language = str(getattr(cfg, "language", "zh") or "")
         self.prompt = str(getattr(cfg, "prompt", "") or "")
+        self.hint = ""
         self.timeout = float(getattr(cfg, "timeout", 20))
         log.info("ASR: 远程转写 %s (model=%s)", self.base_url, self.model)
+
+    def set_hint(self, text: str) -> None:
+        """每次识别前塞入热词（当前歌曲、家里设备名），支持 prompt 的模型会用它纠错。"""
+        self.hint = (text or "").strip()
 
     def transcribe(self, samples: np.ndarray) -> str:
         boundary = uuid.uuid4().hex
         fields = {"model": self.model}
         if self.language:
             fields["language"] = self.language
-        if self.prompt:
-            fields["prompt"] = self.prompt
+        prompt = "\n".join(x for x in (self.prompt, self.hint) if x).strip()
+        if prompt:
+            fields["prompt"] = prompt
 
         body = b""
         for k, v in fields.items():

@@ -308,6 +308,24 @@ class Session:
 
     # ---------- 一句话 ----------
 
+    def _asr_hint(self) -> str:
+        """给支持 prompt 的 ASR 模型做热词偏置：当前/最近歌曲 + 家里设备名。"""
+        parts: list[str] = []
+        for item in self._played[-5:]:
+            title = item.get("title") or ""
+            artist = item.get("artist") or ""
+            if title:
+                parts.append(f"《{title}》{artist}".strip())
+        ha = getattr(self.brain, "ha", None)
+        if ha is not None and ha.enabled:
+            try:
+                parts.extend(ha.labels()[:30])
+            except Exception:
+                pass
+        if not parts:
+            return ""
+        return ("热词：" + "、".join(parts))[:400]
+
     async def _on_segment(self, samples) -> None:
         if self.brain.asr is None:
             await self.send({"type": "error", "message": "语音识别不可用，请检查服务端 ASR 配置"})
@@ -318,13 +336,20 @@ class Session:
             return
         if getattr(self.brain.cfg.asr, "save_audio", False):
             self.brain.save_utterance(samples)
+        asr = self.brain.asr
+        if hasattr(asr, "set_hint"):
+            asr.set_hint(self._asr_hint())
         loop = asyncio.get_running_loop()
-        try:
-            text = await loop.run_in_executor(None, self.brain.asr.transcribe, samples)
-        except Exception as e:
-            log.warning("识别失败：%s", e)
-            await self.send({"type": "error", "message": "语音识别失败"})
-            return
+        text = ""
+        # Qwen3-ASR 在短音频上偶发空结果（自动语种判断不稳），重试一次
+        for _attempt in range(2):
+            try:
+                text = await loop.run_in_executor(None, asr.transcribe, samples)
+            except Exception as e:
+                log.warning("识别失败：%s", e)
+                text = ""
+            if text and text.strip():
+                break
         text = (text or "").strip()
         if text and not re.search(r"[\u4e00-\u9fff]", text) and len(text) < 8:
             log.info("[%s] 丢弃疑似幻听：%s", self.remote, text)
