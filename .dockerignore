@@ -5,7 +5,6 @@
 server/cache
 server/logs
 server/config.yaml
-.env
 client
 tools
 docs
