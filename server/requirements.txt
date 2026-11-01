@@ -3,3 +3,4 @@ numpy>=1.22
 sherpa-onnx>=1.12.30
 edge-tts>=7.0
 PyYAML>=6.0
+pypinyin>=0.51

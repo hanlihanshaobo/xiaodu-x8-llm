@@ -13,9 +13,15 @@ import hashlib
 import logging
 import random
 import re
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+try:
+    from pypinyin import lazy_pinyin
+except Exception:  # 没装也能跑，只是不做同音字纠正
+    lazy_pinyin = None
 
 log = logging.getLogger("music")
 
@@ -66,6 +72,9 @@ class Music:
         self._wbi_at = 0.0
         self._pool: list[dict] = []
         self._refilling = False
+        # 歌手/歌名的同音字纠正缓存（赵磊 → 赵雷、话 → 画）
+        self._artist_cache: list[tuple[str, str]] = []
+        self._artist_at = 0.0
         # 音质模式：original 不转码 / auto 自动 / 128 192 320 固定码率
         self.quality = str(getattr(cfg, "quality_mode", "auto"))
 
@@ -152,6 +161,27 @@ class Music:
             if not q:
                 return await self._play("")
             loop = asyncio.get_running_loop()
+
+            # 先按“歌手 + 歌名”做同音字纠正：
+            # 赵磊 → 赵雷、话 → 画，避免把《画》播成《情话微甜》
+            artist, title = self._split_artist_title(q)
+            if not artist and not title:
+                if self._match_artist(q):
+                    artist, title = q, ""
+            if artist:
+                matched = self._match_artist(artist)
+                if matched:
+                    songs = await loop.run_in_executor(None, self._songs_by_artist, matched)
+                    if songs:
+                        chosen = self._match_title(title, songs) if title else None
+                        if chosen is None:
+                            chosen = random.choice(songs)
+                        item = await self._materialize(chosen)
+                        if item is None:
+                            return {"say": f"《{chosen.get('title', '')}》拿不到播放地址。"}
+                        log.info("同音纠错：%s → %s / %s", q, matched, chosen.get("title"))
+                        return {**item, "say": self._say_text(item)}
+
             songs = []
             for cand in self._query_variants(q):
                 songs = await loop.run_in_executor(None, self._search, cand)
@@ -166,6 +196,104 @@ class Music:
         except Exception as e:
             log.warning("点歌失败：%s", e)
             return {"say": "音乐服务没连上，稍后再试。"}
+
+    def _pinyin(self, s: str) -> str:
+        if lazy_pinyin is None:
+            return ""
+        s = re.sub(r"[^\w\u4e00-\u9fff]", "", s or "")
+        return "".join(lazy_pinyin(s)).lower()
+
+    def _artist_index(self) -> list[tuple[str, str]]:
+        now = time.time()
+        if self._artist_cache and now - self._artist_at < 600:
+            return self._artist_cache
+        try:
+            body = self._nd("getArtists")
+            groups = ((body.get("subsonic-response") or {}).get("artists") or {}).get("index") or []
+            out = []
+            for group in groups:
+                for a in group.get("artist") or []:
+                    aid, name = a.get("id"), a.get("name")
+                    if aid and name:
+                        out.append((str(aid), str(name)))
+            self._artist_cache = out
+            self._artist_at = now
+        except Exception as e:
+            log.info("歌手索引失败：%s", e)
+        return self._artist_cache
+
+    def _match_artist(self, name: str) -> str | None:
+        n = (name or "").strip()
+        if not n:
+            return None
+        artists = self._artist_index()
+        for _, a in artists:
+            if n == a:
+                return a
+        if len(n) >= 2:
+            for _, a in artists:
+                if n in a or a in n:
+                    return a
+        if lazy_pinyin is None:
+            return None
+        key = self._pinyin(n)
+        if not key:
+            return None
+        for _, a in artists:
+            if self._pinyin(a) == key:
+                return a
+        if len(key) >= 4:  # 至少两个字，避免“雷”这种单字乱匹配
+            for _, a in artists:
+                ak = self._pinyin(a)
+                if key in ak or ak in key:
+                    return a
+        return None
+
+    def _songs_by_artist(self, name: str) -> list[dict]:
+        try:
+            songs = self._search_navidrome(name, song_count=100)
+            hit = [s for s in songs if name in (s.get("artist") or "")]
+            return hit or songs
+        except Exception:
+            return []
+
+    def _match_title(self, title: str, songs: list[dict]) -> dict | None:
+        t = (title or "").strip()
+        if not t:
+            return None
+        for s in songs:
+            st = s.get("title") or ""
+            if st == t or t in st or st in t:
+                return s
+        if lazy_pinyin is None:
+            return None
+        key = self._pinyin(t)
+        if not key:
+            return None
+        for s in songs:
+            st = s.get("title") or ""
+            sk = self._pinyin(st)
+            if sk == key or key in sk or sk in key:
+                return s
+        return None
+
+    def _split_artist_title(self, q: str) -> tuple[str, str]:
+        """把“赵磊的话”“赵磊 话”拆成歌手和歌名。"""
+        s = _LEAD_PLAY.sub("", q or "").strip()
+        s = s.strip(" ，,。.！!？?《》\"'“”")
+        artist, title = "", ""
+        if "的" in s:
+            a, t = s.split("的", 1)
+            artist, title = a.strip(), t.strip()
+        elif re.search(r"\s", s):
+            parts = [p for p in re.split(r"\s+", s.strip()) if p]
+            if len(parts) >= 2:
+                artist, title = parts[0], " ".join(parts[1:])
+        if title in ("歌", "歌曲", "音乐", "曲子", "首歌", "好听的歌"):
+            title = ""
+        if not artist:
+            title = ""
+        return artist, title
 
     def _query_variants(self, q: str) -> list[str]:
         """把“赵雷的成都”拆成“成都”“赵雷”，提高本地曲库命中率。"""
@@ -415,10 +543,10 @@ class Music:
         q = urllib.parse.urlencode({**self._nd_params(), **params})
         return self._json(f"{self.nd_url}/rest/{endpoint}.view?{q}")
 
-    def _search_navidrome(self, name: str) -> list[dict]:
+    def _search_navidrome(self, name: str, song_count: int = 6) -> list[dict]:
         if not (self.nd_url and self.nd_user and self.nd_pass):
             return []
-        res = self._nd("search3", query=name, songCount=6)
+        res = self._nd("search3", query=name, songCount=song_count)
         body = (res or {}).get("subsonic-response", {}) or {}
         songs = ((body.get("searchResult3") or {}).get("song")) or []
         out = []
