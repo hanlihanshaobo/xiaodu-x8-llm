@@ -1,0 +1,12 @@
+# 本地配置（含账号密码），不要提交
+server/config.yaml
+
+# 运行时产物
+server/cache/
+server/logs/
+**/__pycache__/
+client/build/
+dist/
+
+*.zip
+*.log

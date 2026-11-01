@@ -1,0 +1,193 @@
+# 配置模板：复制成 config.yaml 后填自己的值
+#   copy server\config.example.yaml server\config.yaml
+# config.yaml 不会进仓库（.gitignore 已排除）
+
+# 小度换脑 —— 服务端配置
+# 模型服务：http://<SERVER_IP>:7863/  (OpenAI 兼容网关)
+# key: <API_KEY>   模型: cn:glm-5.3-flash
+
+server:
+  host: 0.0.0.0
+  port: 8765
+  # 对外声明的地址；留空则自动探测本机局域网 IP
+  public_url: ""
+
+wake:
+  # 原生唤醒已关，这几个词都由我们的 App 接管
+  words: ["小度小度", "小度同学", "你好小度", "你好小度同学", "小度"]
+  # 只唤醒不说话时的应答（会提前合成好，秒回）
+  ack: ["在", "哎", "我在"]
+  # 唤醒后多久内可以不用再喊唤醒词（秒）
+  follow_up_seconds: 25
+  # 说到这些就结束本轮
+  exit_words: ["退出", "再见", "结束对话", "不聊了", "睡觉吧"]
+  # 保留字段：现在原生已关，不需要让位
+  handoff_words: []
+  # 播报中用于打断的词
+  stop_words: ["闭嘴", "停", "别说了", "安静"]
+
+vad:
+  # 纯算法端点检测，不需要任何模型文件
+  threshold: 0.5
+  min_silence: 0.35      # 判定说完所需的静音；越小反应越快
+  min_speech: 0.25
+  max_speech: 15.0
+
+asr:
+  provider: "openai"             # 只用远程识别，本机不放任何模型
+  save_audio: true               # 保存最近 30 句原始音频，识别错了可以回放对比
+  openai:
+    base_url: "http://<MODEL_IP>:8000/v1"
+    api_key: ""
+    model: "SenseVoiceSmall"       # mlx-community/SenseVoiceSmall，中文最准
+    language: "zh"
+    # 热词偏置：Whisper 会参考这段文字，减少"小度"被听成"小杜"之类的错误
+    prompt: "小度小度，小度同学，你好小度。常见说法：今天天气怎么样，打开客厅灯，关掉空调，音量调小一点，放首歌，几点了，设个闹钟，我回来了。"
+    timeout: 20
+  local:
+    model_dir: "C:/LLM/models/sense-voice"
+    num_threads: 4
+
+llm:
+  # 局域网 Mac 上的 omlx，Qwen3.5-9B：关掉思考后首字 0.19s
+  base_url: "http://<MODEL_IP>:8000/v1"
+  api_key: ""
+  model: "Qwen3.5-9B-MLX-4bit"
+  # Qwen3 系列默认会先思考一大段，语音场景必须显式关掉
+  extra:
+    chat_template_kwargs:
+      enable_thinking: false
+  temperature: 0.6
+  max_tokens: 600
+  timeout: 60
+  history_turns: 8
+
+  # 备选：远程网关（首字约 1.8s）
+  # base_url: "http://<SERVER_IP>:7863/v1"
+  # model: "cn:glm-5.3-flash"
+  # reasoning_effort: "low"
+  system_prompt: |
+    你是小度，一个放在客厅里的语音助手。你说话的对象是家人，用口语交流。
+
+    规则：
+    1. 回答尽量短，一般 1~3 句话；用户明确要详细时才展开。
+    2. 只输出要被念出来的内容，不要 Markdown、不要列表、不要括号注释、不要表情符号。
+    3. 数字和单位用中文口语表达，比如"三点五公里"而不是"3.5km"。
+    4. 不确定的事就直说不知道，不要编。
+    5. 你听得到对方说的原文，可能带识别错误；明显不通顺时结合上下文猜测，别反问一堆。
+    6. 需要联网实时信息时如实说明你拿不到。
+    7. 你的名字就叫小度，不要自称小爱、天猫精灵或其他助手。
+    8. 你不能自己播放音乐或视频。真放歌由系统处理；遇到这类请求不要声称「正在播放」。
+    8. 用户让你开关、调节家里的设备时，直接调用工具，不要先解释也不要反问；拿到工具结果后，用一句话告诉用户结果。
+
+# ---------- 智能家居 ----------
+# 地址写这里，长期令牌不要写进配置文件（容易随文件泄露），
+# 按优先级从 HA_TOKEN 环境变量或 ~/.config/opencode/ha.env 读取。
+ha:
+  enabled: true
+  url: "http://<HA_IP>:8123"
+  token: ""
+  cache_seconds: 60
+
+  # 认出"打开客厅灯"就直接执行，不走模型，延迟最低
+  direct_intent: true
+  # 认不出的说法（"把那个有点暗的灯弄亮些"）交给模型调用工具
+  tools: true
+
+  # 只允许语音控制这些域；lock / camera / automation 默认不开
+  domains:
+    - light
+    - switch
+    - fan
+    - cover
+    - climate
+    - humidifier
+    - media_player
+    - scene
+    - script
+    - vacuum
+    - water_heater
+    - input_boolean
+
+  # entity_id 含这些子串一律跳过，防止"打开 SSH"这种要命的指令
+  exclude:
+    - terminal
+    - ssh
+    - file_editor
+    - sendspin
+    - music_assistant
+    - sgcc_electricity
+    - nvr_
+    - dxs_
+    - _indicator_
+    - _status_
+    - physical_controls
+    - _disable_p_
+    - _alarm_p_
+    - constant_protect
+    - overwet_protect
+    - _mode_p_
+
+  # 名字里带这些词的是设备配置项，不是设备本体，语音控制没意义
+  exclude_names:
+    - 指示灯
+    - 状态
+    - 提示音
+    - 锁定
+    - 辅助开关
+
+  # 口头叫法 → 实体 ID。房间名没录进 HA 时靠这个最省事，优先级最高。
+  # 跑 python tools/ha_devices.py 可以列出全部实体，照抄即可。
+  aliases: {}
+  #  客厅灯: light.example_light
+  #  卧室灯: light.example_bedside_light
+
+  # 播报用的名字，覆盖 HA 里的 friendly_name。短一点，念着舒服。
+  names:
+    light.example_light: 卧室灯
+    light.example_bedside_light: 卧室床头灯
+    light.example_chamber_light: 打印机仓灯
+    climate.example_ac: 空调
+    humidifier.example_humidifier: 加湿器
+    switch.example_water_heater: 热水器
+    switch.example_printer: 打印机
+
+music:
+  enabled: true
+  # 只用本地曲库（Navidrome），不联网搜歌
+  providers: ["navidrome"]
+  navidrome:
+    url: "http://<NAVIDROME_IP>:4533"
+    user: "<USER>"
+    password: "<PASSWORD>"
+  api: "https://music-api.gdstudio.xyz/api.php"
+  # 320=MP3（约 5MB） 740=FLAC 无损（约 10MB，多等 1~2 秒）
+  quality: 740
+  # 下载到本地后的存放位置（相对项目根目录），再用局域网推给设备播
+  cache_dir: "server/cache/music"
+  # 说「放首歌」时随机挑一首（用歌名，别用歌手，否则容易搜到冷门翻唱）
+  seeds: ["稻香", "晴天", "起风了", "平凡之路", "后来", "富士山下", "演员", "海阔天空", "小幸运", "夜曲"]
+  # 本地缓存策略：超过容量按最久未用删；超过天数直接删
+  cache_max_mb: 2048
+  cache_max_age_days: 14
+
+tts:
+  engine: "edge"                 # edge | openai | offline
+  voice: "zh-CN-XiaoxiaoNeural"  # edge 用
+  rate: "+8%"
+  volume: "+0%"
+  offline_model_dir: "C:/LLM/models/vits-zh"
+
+  # 局域网里的 OpenAI 兼容 TTS（omlx / Breeze-TTS）。
+  # engine 改成 openai 才会用它；失败会自动回退 edge。
+  openai:
+    base_url: "http://<MODEL_IP>:8000/v1"
+    api_key: ""
+    model: "Breeze-TTS-2-mlx-8bit"
+    voice: ""
+    language: "zh"
+    response_format: "wav"
+    speed: 1.0
+
+log:
+  level: "INFO"
