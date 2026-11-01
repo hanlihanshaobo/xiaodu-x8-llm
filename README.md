@@ -53,11 +53,13 @@ python server/run.py
 
 ### 2. 客户端
 
-```powershell
-powershell -File tools\build_apk.ps1
-```
+推送到 GitHub 后由 Actions 自动构建，产物在 **Actions → build-apk → artifact「XiaoduLink」**。
 
-产物在 `dist/XiaoduLink.apk`，装到小度上即可。
+本地构建（需要 JDK 17 + Android SDK）：
+
+```bash
+bash tools/build_apk.sh
+```
 
 首次打开会引导你关掉原生小度的麦克风权限，之后 App 才能独占麦克风。
 
