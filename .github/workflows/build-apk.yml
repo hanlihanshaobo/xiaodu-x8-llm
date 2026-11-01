@@ -21,10 +21,20 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - uses: android-actions/setup-android@v3
-
-      - name: 安装 SDK 组件
-        run: sdkmanager "platforms;android-33" "build-tools;33.0.2" > /dev/null
+      # 不用 android-actions/setup-android：它还要装已经下架的 `tools` 包，会直接报错
+      - name: 安装 Android SDK
+        run: |
+          set -e
+          SDK="$HOME/android-sdk"
+          mkdir -p "$SDK/cmdline-tools"
+          curl -sSLo /tmp/cmdline.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q /tmp/cmdline.zip -d /tmp/cmdline
+          mv /tmp/cmdline/cmdline-tools "$SDK/cmdline-tools/latest"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" --licenses > /dev/null
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" \
+              "platforms;android-33" "build-tools;33.0.2" > /dev/null
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
 
       - name: 构建 APK
         run: bash tools/build_apk.sh
