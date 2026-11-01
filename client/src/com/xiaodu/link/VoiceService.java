@@ -195,6 +195,7 @@ public class VoiceService extends Service {
                             JSONObject o = new JSONObject();
                             o.put("type", "hello");
                             o.put("sampleRate", 16000);
+                            o.put("quality", Prefs.quality(VoiceService.this));
                             ws.sendText(o.toString());
                         } catch (Exception ignored) {
                         }
@@ -308,19 +309,40 @@ public class VoiceService extends Service {
         }
     }
 
-    /** 清掉两天前的歌曲缓存，避免把 8G 存储塞满 */
+    /** 清掉两天前的歌曲缓存，并按上限删到 90% 以内 */
     private void cleanCache() {
         final long cutoff = System.currentTimeMillis() - 2L * 24 * 3600 * 1000;
+        final long limit = Math.max(64, Prefs.cacheLimitMb(this)) * 1024L * 1024L;
         new Thread(new Runnable() {
             @Override
             public void run() {
                 java.io.File[] fs = getCacheDir().listFiles();
                 if (fs == null) return;
+                java.util.ArrayList<java.io.File> songs = new java.util.ArrayList<>();
+                long total = 0;
                 for (java.io.File f : fs) {
-                    if (f.getName().startsWith("m_") && f.lastModified() < cutoff) {
+                    if (!f.getName().startsWith("m_")) continue;
+                    if (f.lastModified() < cutoff) {
                         f.delete();
+                        continue;
                     }
+                    songs.add(f);
+                    total += f.length();
                 }
+                if (total <= limit) return;
+                // 最久没用的先删，删到上限的 90%
+                songs.sort(new java.util.Comparator<java.io.File>() {
+                    @Override
+                    public int compare(java.io.File a, java.io.File b) {
+                        return Long.compare(a.lastModified(), b.lastModified());
+                    }
+                });
+                for (java.io.File f : songs) {
+                    if (total <= limit * 9 / 10) break;
+                    long len = f.length();
+                    if (f.delete()) total -= len;
+                }
+                Log.i(TAG, "缓存清理完成，剩余 " + (total / 1024 / 1024) + "MB / 上限 " + (limit / 1024 / 1024) + "MB");
             }
         }, "cache-clean").start();
     }
@@ -339,6 +361,11 @@ public class VoiceService extends Service {
                 }
             }
         });
+    }
+
+    /** 界面改完缓存上限后立即清一次 */
+    public void trimCache() {
+        cleanCache();
     }
 
     // ---------------- 供界面调用 ----------------
@@ -447,6 +474,7 @@ public class VoiceService extends Service {
                         public void run() {
                             if (download(murl, f)) {
                                 player.enqueue(mid, f.getAbsolutePath());
+                                cleanCache();          // 下完就按阈值清一次
                             } else {
                                 Bus.post("play_error", "音频下载失败");
                                 postLog("音乐下载失败 " + murl);
@@ -464,6 +492,7 @@ public class VoiceService extends Service {
                             @Override
                             public void run() {
                                 download(purl, pf);
+                                cleanCache();
                             }
                         });
                     }

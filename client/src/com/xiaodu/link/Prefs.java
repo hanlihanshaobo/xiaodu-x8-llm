@@ -46,6 +46,24 @@ public final class Prefs {
         sp(c).edit().putString("theme", v).apply();
     }
 
+    /** auto | original | 128 | 192 | 320 */
+    public static String quality(Context c) {
+        return sp(c).getString("quality", "auto");
+    }
+
+    public static void setQuality(Context c, String v) {
+        sp(c).edit().putString("quality", v).apply();
+    }
+
+    /** 设备上歌曲缓存上限，单位 MB，默认 1G */
+    public static int cacheLimitMb(Context c) {
+        return sp(c).getInt("cache_mb", 1024);
+    }
+
+    public static void setCacheLimitMb(Context c, int v) {
+        sp(c).edit().putInt("cache_mb", v).apply();
+    }
+
     public static boolean hasShownTakeover(Context c) {
         return sp(c).getBoolean("takeover_shown", false);
     }

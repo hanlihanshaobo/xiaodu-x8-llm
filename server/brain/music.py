@@ -63,6 +63,10 @@ class Music:
         self.max_age_days = int(getattr(cfg, "cache_max_age_days", 14))
         self._wbi_key = ""
         self._wbi_at = 0.0
+        self._pool: list[dict] = []
+        self._refilling = False
+        # 音质模式：original 不转码 / auto 自动 / 128 192 320 固定码率
+        self.quality = str(getattr(cfg, "quality_mode", "auto"))
 
         nd = getattr(cfg, "navidrome", None)
         self.nd_url = str(getattr(nd, "url", "") or "").rstrip("/") if nd else ""
@@ -111,27 +115,40 @@ class Music:
             songs = await loop.run_in_executor(None, self._search, name)
             if not songs:
                 return {"say": f"没搜到《{name}》，换个歌名试试？"}
-            song = songs[0]
-        else:
-            song = await loop.run_in_executor(None, self._nd_random)
-            if song:
-                log.info("随机放歌（本地曲库）：%s - %s", song["title"], song["artist"])
-            else:
-                seed = random.choice(self.seeds) if self.seeds else "热歌"
-                log.info("随机放歌，种子：%s", seed)
-                songs = await loop.run_in_executor(None, self._search, seed)
-                if not songs:
-                    return {"say": "曲库暂时搜不到歌，等会儿再试。"}
-                song = songs[0]
+            item = await self._materialize(songs[0])
+            if item is None:
+                return {"say": f"《{songs[0]['title']}》拿不到播放地址，可能没版权。"}
+            return {**item, "say": self._say_text(item)}
 
+        # 随机播放：优先用预加载池，点歌即出
+        if self._pool:
+            item = self._pool.pop(0)
+            log.info("从预加载池取出：%s（剩 %d）", item["title"], len(self._pool))
+            asyncio.create_task(self._refill_pool())
+            return {**item, "say": self._say_text(item)}
+
+        song = await loop.run_in_executor(None, self._nd_random)
+        if not song:
+            seed = random.choice(self.seeds) if self.seeds else "热歌"
+            songs = await loop.run_in_executor(None, self._search, seed)
+            if not songs:
+                return {"say": "曲库暂时搜不到歌，等会儿再试。"}
+            song = songs[0]
+        item = await self._materialize(song)
+        if item is None:
+            return {"say": "这首歌拿不到播放地址，换一首试试。"}
+        asyncio.create_task(self._refill_pool())
+        return {**item, "say": self._say_text(item)}
+
+    async def _materialize(self, song: dict) -> dict | None:
+        """把一首歌落到本地：取直链 → 下载 → 歌词 → 封面"""
+        loop = asyncio.get_running_loop()
         url = await loop.run_in_executor(None, self._stream_url, song)
         if not url:
-            return {"say": f"《{song['title']}》拿不到播放地址，可能没版权。"}
-
+            return None
         path = await loop.run_in_executor(None, self._download, url, song)
         if path is None:
-            return {"say": "下载失败了，网络不太行。"}
-
+            return None
         lrc = ""
         if song.get("lyric_ref") or song["provider"] == "navidrome":
             lrc = await loop.run_in_executor(None, self._lyric, song)
@@ -141,16 +158,47 @@ class Music:
             if p is not None:
                 pic_name = p.name
         await loop.run_in_executor(None, self._sweep)
-
-        say = f"好的，为你播放《{song['title']}》" + (f"，{song['artist']}的。" if song["artist"] else "。")
         return {
-            "say": say,
             "audio": path,
+            "path": path.name,
             "title": song["title"],
             "artist": song["artist"],
             "lrc": lrc,
             "pic": pic_name,
         }
+
+    def _say_text(self, item: dict) -> str:
+        return (f"好的，为你播放《{item['title']}》"
+                + (f"，{item['artist']}的。" if item.get("artist") else "。"))
+
+    async def warm(self) -> None:
+        """服务启动后先把池子填上，用户第一次点歌就不必等转码"""
+        try:
+            await self._refill_pool()
+        except Exception as e:
+            log.info("预热失败：%s", e)
+
+    async def _refill_pool(self) -> None:
+        """后台把下一批歌准备好，切歌/下一首时不用等"""
+        if self._refilling:
+            return
+        self._refilling = True
+        try:
+            loop = asyncio.get_running_loop()
+            while len(self._pool) < 3:
+                song = await loop.run_in_executor(None, self._nd_random)
+                if not song:
+                    break
+                if any(x["title"] == song["title"] for x in self._pool):
+                    continue
+                item = await self._materialize(song)
+                if item:
+                    self._pool.append(item)
+                    log.info("预加载：%s（池 %d）", item["title"], len(self._pool))
+        except Exception as e:
+            log.info("预加载失败：%s", e)
+        finally:
+            self._refilling = False
 
     # ---------- 搜索：按 providers 顺序尝试 ----------
 
@@ -278,9 +326,27 @@ class Music:
             log.warning("Navidrome 随机取歌失败：%s", e)
             return None
 
+    def set_quality(self, q: str) -> None:
+        """切换音质：池子里的歌是按旧码率转的，直接清空"""
+        q = (q or "auto").strip().lower()
+        if q == self.quality:
+            return
+        self.quality = q
+        self._pool.clear()
+        log.info("音质切换为 %s，预加载池已清空", q)
+
     def _nd_stream(self, sid: str) -> str:
-        q = urllib.parse.urlencode({**self._nd_params(), "id": sid})
-        return f"{self.nd_url}/rest/stream.view?{q}"
+        # 让 Navidrome 按当前音质转码；original 不转，直接给源文件
+        params = {**self._nd_params(), "id": sid}
+        if self.quality == "original":
+            pass
+        elif self.quality == "auto":
+            params["format"] = "mp3"
+            params["maxBitRate"] = "128"      # 先低码率，保证秒开
+        else:
+            params["format"] = "mp3"
+            params["maxBitRate"] = self.quality
+        return f"{self.nd_url}/rest/stream.view?{urllib.parse.urlencode(params)}"
 
     def _nd_lyric(self, sid: str) -> str:
         try:
@@ -455,10 +521,13 @@ class Music:
 
     def _download(self, url: str, song: dict) -> Path | None:
         key = hashlib.md5(f"{song['provider']}-{song['ref']}-{self.quality}".encode()).hexdigest()[:16]
-        if ".flac" in url.lower():
+        if song["provider"] == "navidrome":
+            if self.quality == "original" and song.get("suffix"):
+                ext = "." + song["suffix"]
+            else:
+                ext = ".mp3"      # 其它档位都是让 Navidrome 转成 mp3
+        elif ".flac" in url.lower():
             ext = ".flac"
-        elif song["provider"] == "navidrome" and song.get("suffix"):
-            ext = "." + song["suffix"]
         elif song["provider"] == "bilibili":
             ext = ".m4a"
         else:

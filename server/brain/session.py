@@ -90,6 +90,7 @@ class Session:
         self._played: list[dict] = []
         self._music_active = False
         self._next_item: dict | None = None
+        self.quality = "auto"
 
     # ---------- 基础设施 ----------
 
@@ -148,6 +149,10 @@ class Session:
             return
         kind = evt.get("type")
         if kind == "hello":
+            self.quality = str(evt.get("quality") or "auto")
+            music = getattr(self.brain, "music", None)
+            if music is not None:
+                music.set_quality(self.quality)
             await self.send(
                 {
                     "type": "ready",

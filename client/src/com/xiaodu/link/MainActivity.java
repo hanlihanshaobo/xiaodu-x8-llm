@@ -71,6 +71,13 @@ public class MainActivity extends Activity implements Bus.Listener {
     private EditText setServer;
     private CheckBox setAuto;
     private RadioGroup setTheme;
+    private RadioGroup setQuality;
+    private RadioGroup setCache;
+    private android.widget.ScrollView settingsScroll;
+
+    private static final String[] Q_NAMES = {"自动", "不转码", "128k", "192k", "320k"};
+    private static final String[] Q_VALUES = {"auto", "original", "128", "192", "320"};
+    private static final int[] CACHE_MB = {512, 1024, 2048, 5120};
 
     private String lastUser = "";
     private final StringBuilder reply = new StringBuilder();
@@ -214,7 +221,7 @@ public class MainActivity extends Activity implements Bus.Listener {
 
         content.addView(assistantView, matchFrame());
         content.addView(musicView, matchFrame());
-        content.addView(settingsView, matchFrame());
+        content.addView(settingsScroll, matchFrame());
 
         setContentView(root);
         showTab(0);
@@ -509,6 +516,65 @@ public class MainActivity extends Activity implements Bus.Listener {
         }
         settingsView.addView(setTheme);
 
+        TextView labelQ = new TextView(this);
+        labelQ.setText("音质");
+        labelQ.setTextColor(cSub);
+        labelQ.setTextSize(14);
+        LinearLayout.LayoutParams pQ = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        pQ.topMargin = dp(14);
+        settingsView.addView(labelQ, pQ);
+
+        setQuality = new RadioGroup(this);
+        setQuality.setOrientation(RadioGroup.HORIZONTAL);
+        String[] qNames = Q_NAMES;
+        String[] qValues = Q_VALUES;
+        for (int i = 0; i < qNames.length; i++) {
+            RadioButton rb = new RadioButton(this);
+            rb.setText(qNames[i]);
+            rb.setTag(qValues[i]);
+            rb.setTextColor(cText);
+            rb.setTextSize(15);
+            rb.setId(2000 + i);
+            setQuality.addView(rb);
+        }
+        settingsView.addView(setQuality);
+
+        TextView qHint = new TextView(this);
+        qHint.setText("自动：先 128k 秒开，后台再补高码率");
+        qHint.setTextColor(cSub);
+        qHint.setTextSize(12);
+        settingsView.addView(qHint);
+
+        TextView labelC = new TextView(this);
+        labelC.setText("歌曲缓存上限");
+        labelC.setTextColor(cSub);
+        labelC.setTextSize(14);
+        LinearLayout.LayoutParams pC = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        pC.topMargin = dp(14);
+        settingsView.addView(labelC, pC);
+
+        setCache = new RadioGroup(this);
+        setCache.setOrientation(RadioGroup.HORIZONTAL);
+        String[] cNames = {"512M", "1G", "2G", "5G"};
+        for (int i = 0; i < cNames.length; i++) {
+            RadioButton rb = new RadioButton(this);
+            rb.setText(cNames[i]);
+            rb.setTag(CACHE_MB[i]);
+            rb.setTextColor(cText);
+            rb.setTextSize(15);
+            rb.setId(3000 + i);
+            setCache.addView(rb);
+        }
+        settingsView.addView(setCache);
+
+        TextView cHint = new TextView(this);
+        cHint.setText("超过上限自动删除最久没听的歌");
+        cHint.setTextColor(cSub);
+        cHint.setTextSize(12);
+        settingsView.addView(cHint);
+
         LinearLayout buttons = new LinearLayout(this);
         buttons.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams p4 = new LinearLayout.LayoutParams(
@@ -541,6 +607,12 @@ public class MainActivity extends Activity implements Bus.Listener {
                 discover();
             }
         }));
+
+        settingsScroll = new android.widget.ScrollView(this);
+        settingsScroll.setFillViewport(true);
+        settingsScroll.addView(settingsView, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+        settingsView.setVisibility(View.VISIBLE);
     }
 
     private void fillSettings() {
@@ -549,6 +621,20 @@ public class MainActivity extends Activity implements Bus.Listener {
         String t = Prefs.theme(this);
         int idx = "auto".equals(t) ? 0 : ("dark".equals(t) ? 1 : 2);
         setTheme.check(1000 + idx);
+
+        String q = Prefs.quality(this);
+        int qi = 0;
+        for (int i = 0; i < Q_VALUES.length; i++) {
+            if (Q_VALUES[i].equals(q)) qi = i;
+        }
+        setQuality.check(2000 + qi);
+
+        int mb = Prefs.cacheLimitMb(this);
+        int ci = 1;
+        for (int i = 0; i < CACHE_MB.length; i++) {
+            if (CACHE_MB[i] == mb) ci = i;
+        }
+        setCache.check(3000 + ci);
     }
 
     private void saveSettings() {
@@ -561,9 +647,24 @@ public class MainActivity extends Activity implements Bus.Listener {
         boolean changed = !theme.equals(Prefs.theme(this));
         Prefs.setTheme(this, theme);
 
+        RadioButton qb = findViewById(setQuality.getCheckedRadioButtonId());
+        String q = qb != null ? String.valueOf(qb.getTag()) : "auto";
+        boolean qChanged = !q.equals(Prefs.quality(this));
+        Prefs.setQuality(this, q);
+
+        RadioButton cb = findViewById(setCache.getCheckedRadioButtonId());
+        int mb = cb != null ? (Integer) cb.getTag() : 1024;
+        Prefs.setCacheLimitMb(this, mb);
+        VoiceService svc = VoiceService.INSTANCE;
+        if (svc != null) svc.trimCache();
+
         if (changed) {
             recreate();
             return;
+        }
+        if (qChanged) {
+            restartVoice();
+            Toast.makeText(this, "音质已切换", Toast.LENGTH_SHORT).show();
         }
         if (host.isEmpty()) {
             Toast.makeText(this, "先填服务端地址", Toast.LENGTH_SHORT).show();
@@ -578,7 +679,9 @@ public class MainActivity extends Activity implements Bus.Listener {
         if (assistantView == null) return;
         assistantView.setVisibility(which == 0 ? View.VISIBLE : View.GONE);
         musicView.setVisibility(which == 1 ? View.VISIBLE : View.GONE);
-        settingsView.setVisibility(which == 2 ? View.VISIBLE : View.GONE);
+        if (settingsScroll != null) {
+            settingsScroll.setVisibility(which == 2 ? View.VISIBLE : View.GONE);
+        }
         tabAssistant.setBackground(makePill(which == 0));
         tabAssistant.setTextColor(which == 0 ? Color.WHITE : cSub);
         tabMusic.setBackground(makePill(which == 1));
