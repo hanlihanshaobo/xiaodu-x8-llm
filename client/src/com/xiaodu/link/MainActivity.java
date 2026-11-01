@@ -271,6 +271,13 @@ public class MainActivity extends Activity implements Bus.Listener {
 
         npCover = new android.widget.ImageView(this);
         npCover.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+        // 圆角封面：用背景轮廓裁剪
+        android.graphics.drawable.GradientDrawable coverBg =
+                new android.graphics.drawable.GradientDrawable();
+        coverBg.setColor(0xFF161B22);
+        coverBg.setCornerRadius(dp(16));
+        npCover.setBackground(coverBg);
+        npCover.setClipToOutline(true);
         // 海报占屏幕宽度约 44%，和右侧歌词基本各占一半
         int coverSide = (int) (getResources().getDisplayMetrics().widthPixels * 0.44f);
         LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(coverSide, coverSide);
@@ -283,6 +290,16 @@ public class MainActivity extends Activity implements Bus.Listener {
         info.setGravity(Gravity.CENTER_VERTICAL);
         top.addView(info, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+
+        TextView npLabel = new TextView(this);
+        npLabel.setText("正在播放");
+        npLabel.setTextColor(0xFF1F6FEB);
+        npLabel.setTextSize(12);
+        npLabel.setLetterSpacing(0.25f);
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        nlp.bottomMargin = dp(6);
+        info.addView(npLabel, nlp);
 
         npTitle = new TextView(this);
         npTitle.setTextColor(0xFFE5E7EB);
@@ -303,8 +320,8 @@ public class MainActivity extends Activity implements Bus.Listener {
         npLyric = new TextView(this);
         npLyric.setTextColor(0xFF7EE787);
         npLyric.setTextSize(26);
-        npLyric.setLineSpacing(dp(14), 1f);
-        npLyric.setGravity(Gravity.TOP);
+        npLyric.setLineSpacing(dp(18), 1f);
+        npLyric.setGravity(Gravity.CENTER_VERTICAL);
         // 长句自动换行，不要省略号
         npLyric.setSingleLine(false);
         npLyric.setHorizontallyScrolling(false);
