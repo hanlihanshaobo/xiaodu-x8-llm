@@ -63,6 +63,8 @@ bash tools/build_apk.sh
 
 首次打开会引导你关掉原生小度的麦克风权限，之后 App 才能独占麦克风。
 
+服务端跑起来后，也可以让设备直接打开 `http://<服务端IP>:8765/apk/XiaoduLink.apk` 下载最新 APK（需要本地 `dist/XiaoduLink.apk` 存在）。
+
 ### 3. 配置
 
 所有可调项都在 `server/config.yaml`（不进仓库），模板见 `server/config.example.yaml`：

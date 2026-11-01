@@ -190,6 +190,17 @@ async def handle_tts(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(path, headers={"Cache-Control": "no-store"})
 
 
+async def handle_apk(request: web.Request) -> web.StreamResponse:
+    """给设备一个局域网直链，FTP 不方便时也能装新包。"""
+    path = ROOT / "dist" / "XiaoduLink.apk"
+    if not path.exists():
+        raise web.HTTPNotFound()
+    return web.FileResponse(path, headers={
+        "Cache-Control": "no-store",
+        "Content-Disposition": 'attachment; filename="XiaoduLink.apk"',
+    })
+
+
 async def handle_music(request: web.Request) -> web.StreamResponse:
     """音乐文件单独一个路由：支持 Range，播放器可以边下边播、拖动进度。"""
     name = request.match_info["name"]
@@ -235,7 +246,7 @@ async def handle_index(request: web.Request) -> web.Response:
  .empty{{color:#8b949e;text-align:center;padding:24px}}
 </style>
 <h1>小度大脑 · 运行中</h1>
-<div class="sub">已运行 {up//3600}h{(up%3600)//60}m{up%60}s ｜ 服务地址 {brain.public_url}</div>
+<div class="sub">已运行 {up//3600}h{(up%3600)//60}m{up%60}s ｜ 服务地址 {brain.public_url} ｜ <a href="/apk/XiaoduLink.apk" style="color:#58a6ff">下载最新 APK</a></div>
 <div class="card">
   <div class="k">模型</div><div class="v">{brain.llm.model}</div>
   <div class="k" style="margin-top:10px">推理档位</div><div class="v">{brain.llm.reasoning_effort or '默认'}</div>
@@ -267,6 +278,7 @@ async def amain(config_path: Path) -> None:
     app.router.add_get("/", handle_index)
     app.router.add_get("/ws", handle_ws)
     app.router.add_get("/tts/{name}", handle_tts)
+    app.router.add_get("/apk/XiaoduLink.apk", handle_apk)
     app.router.add_get("/music/{name}", handle_music)
     app.router.add_get("/healthz", lambda r: web.json_response({"ok": True}))
 
