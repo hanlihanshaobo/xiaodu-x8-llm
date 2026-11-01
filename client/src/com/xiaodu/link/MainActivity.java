@@ -73,7 +73,13 @@ public class MainActivity extends Activity implements Bus.Listener {
     private RadioGroup setTheme;
     private RadioGroup setQuality;
     private RadioGroup setCache;
+    private RadioGroup setProxy;
+    private EditText proxyCustom;
     private android.widget.ScrollView settingsScroll;
+
+    private static final String[] P_NAMES = {"直连", "gh-proxy", "ghfast", "ghproxy", "自定义"};
+    private static final String[] P_VALUES = {"", "https://gh-proxy.com/", "https://ghfast.top/",
+            "https://ghproxy.net/", "custom"};
 
     private static final String[] Q_NAMES = {"自动", "不转码", "128k", "192k", "320k"};
     private static final String[] Q_VALUES = {"auto", "original", "128", "192", "320"};
@@ -575,6 +581,40 @@ public class MainActivity extends Activity implements Bus.Listener {
         cHint.setTextSize(12);
         settingsView.addView(cHint);
 
+        TextView labelP = new TextView(this);
+        labelP.setText("GitHub 加速下载");
+        labelP.setTextColor(cSub);
+        labelP.setTextSize(14);
+        LinearLayout.LayoutParams pP = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        pP.topMargin = dp(14);
+        settingsView.addView(labelP, pP);
+
+        setProxy = new RadioGroup(this);
+        setProxy.setOrientation(RadioGroup.HORIZONTAL);
+        for (int i = 0; i < P_NAMES.length; i++) {
+            RadioButton rb = new RadioButton(this);
+            rb.setText(P_NAMES[i]);
+            rb.setTag(P_VALUES[i]);
+            rb.setTextColor(cText);
+            rb.setTextSize(15);
+            rb.setId(4000 + i);
+            setProxy.addView(rb);
+        }
+        settingsView.addView(setProxy);
+
+        proxyCustom = new EditText(this);
+        proxyCustom.setHint("https://gh-proxy.com/");
+        proxyCustom.setHintTextColor(cSub);
+        proxyCustom.setTextColor(cText);
+        proxyCustom.setTextSize(15);
+        proxyCustom.setBackground(cardBg());
+        proxyCustom.setPadding(dp(14), dp(8), dp(14), dp(8));
+        LinearLayout.LayoutParams pP2 = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        pP2.topMargin = dp(8);
+        settingsView.addView(proxyCustom, pP2);
+
         LinearLayout buttons = new LinearLayout(this);
         buttons.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams p4 = new LinearLayout.LayoutParams(
@@ -607,6 +647,12 @@ public class MainActivity extends Activity implements Bus.Listener {
                 discover();
             }
         }));
+        buttons.addView(smallButton("检查更新", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                checkUpdate();
+            }
+        }));
 
         settingsScroll = new android.widget.ScrollView(this);
         settingsScroll.setFillViewport(true);
@@ -635,6 +681,22 @@ public class MainActivity extends Activity implements Bus.Listener {
             if (CACHE_MB[i] == mb) ci = i;
         }
         setCache.check(3000 + ci);
+
+        String proxy = Prefs.proxyPrefix(this);
+        int pi = 0;
+        boolean custom = true;
+        for (int i = 0; i < P_VALUES.length - 1; i++) {
+            if (P_VALUES[i].equals(proxy)) {
+                pi = i;
+                custom = false;
+                break;
+            }
+        }
+        if (custom) {
+            pi = P_VALUES.length - 1;
+            proxyCustom.setText(proxy);
+        }
+        setProxy.check(4000 + pi);
     }
 
     private void saveSettings() {
@@ -657,6 +719,11 @@ public class MainActivity extends Activity implements Bus.Listener {
         Prefs.setCacheLimitMb(this, mb);
         VoiceService svc = VoiceService.INSTANCE;
         if (svc != null) svc.trimCache();
+
+        RadioButton pb = findViewById(setProxy.getCheckedRadioButtonId());
+        String pv = pb != null ? String.valueOf(pb.getTag()) : "";
+        if ("custom".equals(pv)) pv = proxyCustom.getText().toString().trim();
+        Prefs.setProxyPrefix(this, pv);
 
         if (changed) {
             recreate();
@@ -707,6 +774,45 @@ public class MainActivity extends Activity implements Bus.Listener {
             fillSettings();
             showTab(2);
         }
+    }
+
+    private void checkUpdate() {
+        Toast.makeText(this, "正在检查更新…", Toast.LENGTH_SHORT).show();
+        Updater.check(this, new Updater.Callback() {
+            @Override
+            public void onResult(final boolean ok, final String message, final String url,
+                                 final long id, final boolean newer) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (!ok) {
+                            Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        if (!newer || url == null) {
+                            Toast.makeText(MainActivity.this, "已是最新：" + message,
+                                    Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        final String target = Updater.proxied(MainActivity.this, url);
+                        dialog()
+                                .setTitle("发现新版本")
+                                .setMessage(message + "\n\n下载地址：\n" + target)
+                                .setPositiveButton("下载并安装", new DialogInterface.OnClickListener() {
+                                    @Override
+                                    public void onClick(DialogInterface d, int w) {
+                                        Prefs.setUpdateId(MainActivity.this, id);
+                                        Updater.downloadAndInstall(MainActivity.this, target);
+                                        Toast.makeText(MainActivity.this, "开始下载，完成后会弹出安装",
+                                                Toast.LENGTH_LONG).show();
+                                    }
+                                })
+                                .setNegativeButton("稍后", null)
+                                .show();
+                    }
+                });
+            }
+        });
     }
 
     private void discover() {
@@ -881,8 +987,9 @@ public class MainActivity extends Activity implements Bus.Listener {
             return;
         }
         if (idx < 0) idx = 0;
-        int start = Math.max(0, idx - 1);
-        int end = Math.min(npLines.size(), idx + 2);
+        // 六行：当前行上下各两到三行
+        int start = Math.max(0, idx - 2);
+        int end = Math.min(npLines.size(), idx + 4);
         SpannableStringBuilder sb = new SpannableStringBuilder();
         for (int i = start; i < end; i++) {
             int from = sb.length();

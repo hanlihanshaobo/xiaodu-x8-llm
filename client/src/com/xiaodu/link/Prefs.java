@@ -64,6 +64,24 @@ public final class Prefs {
         sp(c).edit().putInt("cache_mb", v).apply();
     }
 
+    /** 已见到的 Release id，用于判断有没有新版本 */
+    public static long updateId(Context c) {
+        return sp(c).getLong("update_id", 0L);
+    }
+
+    public static void setUpdateId(Context c, long v) {
+        sp(c).edit().putLong("update_id", v).apply();
+    }
+
+    /** GitHub 下载加速前缀，空表示直连 */
+    public static String proxyPrefix(Context c) {
+        return sp(c).getString("proxy", "");
+    }
+
+    public static void setProxyPrefix(Context c, String v) {
+        sp(c).edit().putString("proxy", v == null ? "" : v).apply();
+    }
+
     public static boolean hasShownTakeover(Context c) {
         return sp(c).getBoolean("takeover_shown", false);
     }

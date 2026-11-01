@@ -10,6 +10,9 @@ on:
       - ".github/workflows/build-apk.yml"
   workflow_dispatch:
 
+permissions:
+  contents: write          # 需要发 Release
+
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -45,7 +48,22 @@ jobs:
           path: dist/XiaoduLink.apk
           if-no-files-found: error
 
-      - name: 附加到 Release
+      # 固定 tag `latest`：每次覆盖同一个 Release，App 端只需查 latest
+      - name: 发布到 Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "最新构建 · ${{ github.run_number }}"
+          body: |
+            自动构建 #${{ github.run_number }}
+            提交：${{ github.sha }}
+            时间：${{ github.event.head_commit.timestamp }}
+
+            App 内「设置 → 检查更新」可以直接下载安装。
+          files: dist/XiaoduLink.apk
+          make_latest: true
+
+      - name: 打 tag 时额外发正式版
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
