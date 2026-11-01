@@ -597,6 +597,16 @@ class HomeAssistant:
             "“客厅灯还亮着吗”就调用 home_status。"
         )
 
+    def labels(self) -> list[str]:
+        """给意图解析用的设备名列表（去重、按区域排序）。"""
+        if not self._devices:
+            return []
+        names = []
+        for d in sorted(self._devices.values(), key=lambda x: (x.area, x.name)):
+            if d.label not in names:
+                names.append(d.label)
+        return names[:60]
+
     async def run_tool(self, name: str, args: dict) -> str:
         """执行模型发起的工具调用，返回一段给模型看的结果文字。"""
         await self.ensure()

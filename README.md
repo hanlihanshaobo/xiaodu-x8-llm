@@ -76,6 +76,21 @@ bash tools/build_apk.sh
 | `music` | Navidrome 地址与账号、缓存策略 |
 | `ha` | Home Assistant（可选） |
 
+### 4. Docker（可选）
+
+镜像同时支持 `linux/amd64`、`linux/arm64`、`linux/arm/v7`（32 位 ARM），拉取时会自动选对应架构：
+
+```bash
+docker run -d --name xiaodu-brain \
+  -p 8765:8765 -p 8766:8766/udp \
+  -v "$PWD/server/config.yaml:/app/server/config.yaml:ro" \
+  -v "$PWD/server/cache:/app/server/cache" \
+  -v "$PWD/server/logs:/app/server/logs" \
+  ghcr.io/hanlihanshaobo/xiaodu-x8-llm:latest
+```
+
+注意：`config.yaml` 里的 `public_url` 要填宿主机在局域网里的地址（比如 `http://192.168.1.10:8765`），不能填容器 IP，否则设备下载不到音频。UDP 8766 用于服务端自动发现；Linux/NAS 上如果自动发现失败，把 `-p ...` 换成 `--network host` 再试。
+
 ## 通信协议
 
 设备 → 服务端
@@ -96,11 +111,12 @@ bash tools/build_apk.sh
 | `asr` / `reply` | 字幕 |
 | `speak` | 播放一段 TTS |
 | `music` | 播放一首歌（带标题、歌词、封面） |
-| `stop` / `audio_pause` / `audio_resume` | 播放控制 |
+| `preload` | 下一首提前下载到设备 |
+| `stop` / `stop_speech` / `audio_pause` / `audio_resume` | 播放控制 |
 
 ## 已知限制
 
-- 播放音乐时麦克风关闭（半双工），期间不能语音唤醒，需点屏幕停止
+- 播放音乐时仍监听唤醒词（切到带回声消除的采集源）；TTS 播报时短暂闭麦
 - 需要一台常开的机器跑服务端；X8 只有 1GB 内存，跑不了模型
 - 首次播放要从曲库下载整首歌到设备，约 2~5 秒
 
@@ -108,8 +124,8 @@ bash tools/build_apk.sh
 
 - [ ] **视频接入 Emby**：复用现有的播放器与字幕 UI，增加视频解码与全屏播放
 - [ ] 断点续播、播放列表管理
-- [ ] 本地唤醒词（端侧 KWS），播放中也能唤醒
-- [ ] 服务端 Docker 化部署文档补全
+- [x] 播放中也能唤醒（AEC 采集 + 服务端 ASR）
+- [x] Docker 多架构镜像（amd64 / arm64 / armv7）
 
 ## 免责声明
 

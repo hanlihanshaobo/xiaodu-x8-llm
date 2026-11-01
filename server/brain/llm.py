@@ -60,7 +60,9 @@ class LLM:
         msgs.extend(history[-turns * 2:])
         return msgs
 
-    async def stream(self, messages: list[dict], tools: list[dict] | None = None) -> AsyncIterator[dict]:
+    async def stream(self, messages: list[dict], tools: list[dict] | None = None,
+                     temperature: float | None = None,
+                     max_tokens: int | None = None) -> AsyncIterator[dict]:
         """产出事件：
 
             {"type": "text", "text": "..."}
@@ -71,23 +73,25 @@ class LLM:
         if tools and not self.tools_supported:
             tools = None
         try:
-            async for ev in self._stream(messages, tools):
+            async for ev in self._stream(messages, tools, temperature, max_tokens):
                 yield ev
         except _ToolsUnsupported:
             if not tools:
                 raise
             log.warning("模型不支持 function calling，降级为纯文本对话")
             self.tools_supported = False
-            async for ev in self._stream(messages, None):
+            async for ev in self._stream(messages, None, temperature, max_tokens):
                 yield ev
 
-    async def _stream(self, messages: list[dict], tools: list[dict] | None) -> AsyncIterator[dict]:
+    async def _stream(self, messages: list[dict], tools: list[dict] | None,
+                      temperature: float | None = None,
+                      max_tokens: int | None = None) -> AsyncIterator[dict]:
         payload = {
             "model": self.model,
             "messages": messages,
             "stream": True,
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
+            "temperature": self.temperature if temperature is None else temperature,
+            "max_tokens": self.max_tokens if max_tokens is None else max_tokens,
         }
         if self.reasoning_effort:
             payload["reasoning_effort"] = self.reasoning_effort

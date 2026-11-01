@@ -417,7 +417,8 @@ public class MainActivity extends Activity implements Bus.Listener {
         ctrl.addView(smallButton("停止", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                send("停止播放");
+                VoiceService svc = VoiceService.INSTANCE;
+                if (svc != null) svc.stopPlayback();
             }
         }));
 
@@ -902,6 +903,12 @@ public class MainActivity extends Activity implements Bus.Listener {
             npPlaying = false;
             if (npPlayBtn != null) npPlayBtn.setText("播放");
             stopNpTick();
+        } else if ("paused".equals(type)) {
+            npPlaying = false;
+            if (npPlayBtn != null) npPlayBtn.setText("播放");
+        } else if ("playing".equals(type)) {
+            npPlaying = true;
+            if (npPlayBtn != null) npPlayBtn.setText("暂停");
         } else if ("play_error".equals(type)) {
             Toast.makeText(this, "播放失败：" + payload, Toast.LENGTH_LONG).show();
         } else if ("asr".equals(type)) {

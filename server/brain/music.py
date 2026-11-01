@@ -20,13 +20,14 @@ from pathlib import Path
 log = logging.getLogger("music")
 
 _STOP = ("暂停", "别放了", "停止播放", "停一下", "关掉音乐", "别唱了")
-_RESUME = ("继续放", "接着放", "继续播", "接着播")
+_RESUME = ("继续放", "接着放", "继续播", "接着播", "继续", "接着")
 _NEXT = ("下一首", "换一首", "下一曲", "切歌")
 _PREV = ("上一首", "上一曲", "前一首")
 _VOL_UP = ("音量大", "声音大", "大声点", "大点声", "调大声")
 _VOL_DOWN = ("音量小", "声音小", "小声点", "小点声", "调小声")
 
 _PLAY = re.compile(r"^(?:帮我|给我|请|麻烦)?\s*(?:播放|放|来|听)\s*(?:一首|一手|一段|一个|一首歌|首|手|曲|点)?\s*(.*)$")
+_LEAD_PLAY = re.compile(r"^(?:我想听|想听|我要听|要听|播放|放|来|听)\s*")
 _LEAD_UNIT = re.compile(r"^[一首手曲段个支张]\s*")
 _TAIL = re.compile(r"(的歌|的歌曲|的曲子|音乐|歌曲|曲子|听听|吧|呀|啊)+$")
 
@@ -82,6 +83,115 @@ class Music:
         if any(w in q for w in _STOP + _RESUME + _NEXT + _PREV + _VOL_UP + _VOL_DOWN):
             return True
         return bool(_PLAY.match(q))
+
+    def is_control(self, query: str) -> bool:
+        """暂停/继续/切歌/音量这类确定性指令，仍然走本地，响应最快。"""
+        q = (query or "").strip()
+        return any(w in q for w in _STOP + _RESUME + _NEXT + _PREV + _VOL_UP + _VOL_DOWN)
+
+    def has_song_name(self, query: str) -> bool:
+        """带具体歌名的点歌，交给模型先理解，ASR 听错时还能结合上下文纠正。"""
+        return bool(self._song_name(query or ""))
+
+    def tools(self) -> list[dict]:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "music_play",
+                    "description": (
+                        "播放用户想听的音乐。用户点歌、换歌、想听某首歌或某个歌手时调用。"
+                        "query 只填歌名或歌手，不要带“播放”“放一首”等词；"
+                        "用户没指定歌名时留空，表示随机播放。"
+                        "如果识别出的歌名明显有错，结合上下文换成最可能的歌名再调用。"
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "歌名或歌手，例如：晴天、周杰伦、周杰伦 晴天；随机播放留空",
+                            }
+                        },
+                        "required": ["query"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "music_control",
+                    "description": "控制正在播放的音乐：暂停、继续、下一首、上一首、停止、音量加减",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "action": {
+                                "type": "string",
+                                "enum": ["pause", "resume", "next", "prev", "stop", "volume_up", "volume_down"],
+                                "description": "要执行的动作",
+                            }
+                        },
+                        "required": ["action"],
+                    },
+                },
+            },
+        ]
+
+    def prompt_hint(self) -> str:
+        return (
+            "用户想听歌、点歌、切歌、暂停/继续/停止或调音量时，必须调用 "
+            "music_play 或 music_control，不要只口头答应。"
+            "用户说的歌名可能带识别错误，结合上下文判断；拿不准时也先按最可能的歌名调用 "
+            "music_play，不要反问一堆。"
+        )
+
+    async def play(self, query: str = "") -> dict:
+        """模型点歌：query 已经是干净的歌名/歌手，不再依赖“播放”前缀。"""
+        q = (query or "").strip()
+        try:
+            if not q:
+                return await self._play("")
+            loop = asyncio.get_running_loop()
+            songs = []
+            for cand in self._query_variants(q):
+                songs = await loop.run_in_executor(None, self._search, cand)
+                if songs:
+                    break
+            if not songs:
+                return {"say": f"没搜到《{q}》，换个歌名试试？"}
+            item = await self._materialize(songs[0])
+            if item is None:
+                return {"say": f"《{songs[0]['title']}》拿不到播放地址。"}
+            return {**item, "say": self._say_text(item)}
+        except Exception as e:
+            log.warning("点歌失败：%s", e)
+            return {"say": "音乐服务没连上，稍后再试。"}
+
+    def _query_variants(self, q: str) -> list[str]:
+        """把“赵雷的成都”拆成“成都”“赵雷”，提高本地曲库命中率。"""
+        out: list[str] = []
+
+        def add(x: str) -> None:
+            x = (x or "").strip()
+            if x and x not in out:
+                out.append(x)
+
+        add(q)
+        alt = _LEAD_PLAY.sub("", q).strip()
+        alt = _TAIL.sub("", alt).strip(" ，,。.！!？?《》\"'“”")
+        add(alt)
+        for base in list(out):
+            if re.search(r"\s", base):
+                parts = [p.strip() for p in re.split(r"\s+", base) if p.strip()]
+            elif "的" in base:
+                parts = [p.strip() for p in base.split("的") if p.strip()]
+            else:
+                continue
+            for p in reversed(parts):
+                add(p)
+            if len(parts) > 1:
+                add(" ".join(parts))
+        return out
 
     # ---------- 执行 ----------
 

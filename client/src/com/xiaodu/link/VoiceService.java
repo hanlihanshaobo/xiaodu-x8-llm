@@ -40,10 +40,13 @@ public class VoiceService extends Service {
     private volatile boolean running;
     private volatile boolean muted;
     private volatile boolean connected;
+    /** 音乐播放中：改用带回声消除的采集源，尽量听见唤醒词 */
+    private volatile boolean musicMode;
 
     private volatile Ws ws;
     private Player player;
     private AudioRecord recorder;
+    private boolean recorderAec;   // 当前采集源是否启用了回声消除
     private int sampleRate = 16000;
     private AcousticEchoCanceler aec;
     private NoiseSuppressor ns;
@@ -78,7 +81,8 @@ public class VoiceService extends Service {
                         }
                     }
                 });
-                if (!player.isBusy()) muted = false;
+                // 只有语音播报时才需要闭麦；音乐继续放时也要能听见唤醒词
+                if (!player.isSpeechBusy()) muted = false;
             }
 
             @Override
@@ -392,6 +396,7 @@ public class VoiceService extends Service {
         try {
             player.stopAll();
             muted = false;
+            musicMode = false;
             netExec.execute(new Runnable() {
                 @Override
                 public void run() {
@@ -458,22 +463,22 @@ public class VoiceService extends Service {
                 Bus.post("reply", o.optString("delta"));
             } else if ("speak".equals(type)) {
                 muted = true;
-                player.enqueue(o.optString("id"), o.optString("url"));
+                player.enqueueSpeech(o.optString("id"), o.optString("url"));
                 Bus.post("speak", o.optString("text"));
             } else if ("music".equals(type)) {
-                muted = true;
+                musicMode = true;
                 Bus.post("music", text);   // 先切界面
                 final String mid = o.optString("id");
                 final String murl = o.optString("url");
                 final java.io.File f = new java.io.File(getCacheDir(), cacheName(murl));
                 if (f.exists() && f.length() > 100_000) {
-                    player.enqueue(mid, f.getAbsolutePath());   // 预加载命中，秒开
+                    player.enqueueMusic(mid, f.getAbsolutePath());   // 预加载命中，秒开
                 } else {
                     netExec.execute(new Runnable() {
                         @Override
                         public void run() {
                             if (download(murl, f)) {
-                                player.enqueue(mid, f.getAbsolutePath());
+                                player.enqueueMusic(mid, f.getAbsolutePath());
                                 cleanCache();          // 下完就按阈值清一次
                             } else {
                                 Bus.post("play_error", "音频下载失败");
@@ -509,15 +514,25 @@ public class VoiceService extends Service {
                 } catch (Exception ignored) {
                 }
             } else if ("audio_pause".equals(type)) {
-                player.pause();
+                player.pauseMusic();
+                musicMode = false;
+                muted = false;
+                Bus.post("paused", "");
             } else if ("audio_resume".equals(type)) {
-                player.resume();
+                player.resumeMusic();
+                musicMode = true;
+                Bus.post("playing", "");
+            } else if ("stop_speech".equals(type)) {
+                muted = false;
+                player.stopSpeech();
             } else if ("stop".equals(type)) {
                 muted = false;
+                musicMode = false;
                 player.stopAll();
                 Bus.post("state", "listening");
             } else if ("release".equals(type)) {
                 muted = false;
+                musicMode = false;
                 player.stopAll();
                 Bus.post("state", "idle");
             } else if ("error".equals(type)) {
@@ -532,6 +547,10 @@ public class VoiceService extends Service {
 
     private void captureLoop() {
         while (running) {
+            // 放歌时切到带 AEC 的采集源，暂停/停止后切回来
+            if (recorder != null && musicMode != recorderAec) {
+                releaseRecorder();
+            }
             if (!ensureRecorder()) {
                 Bus.post("error", "打不开麦克风，检查权限");
                 sleep(2000);
@@ -540,6 +559,7 @@ public class VoiceService extends Service {
             int frameBytes = sampleRate / 50 * 2; // 20ms
             byte[] buf = new byte[frameBytes];
             while (running) {
+                if (musicMode != recorderAec) break;   // 需要换采集源
                 int n;
                 try {
                     n = recorder.read(buf, 0, buf.length);
@@ -552,24 +572,31 @@ public class VoiceService extends Service {
                     continue;
                 }
                 if (muted || !connected || ws == null || !ws.isOpen()) {
-                    continue; // 播报中不收音，避免把自己的声音喂回去
+                    continue; // 只有播报时闭麦；放歌时继续收音，才能听见唤醒词
                 }
                 byte[] out = convert(buf, n);
                 if (out != null && out.length > 0) ws.sendBinary(out, 0, out.length);
             }
+            boolean switching = musicMode != recorderAec;
             releaseRecorder();
-            if (running) sleep(500);
+            if (running && !switching) sleep(500);
         }
     }
 
     private boolean ensureRecorder() {
         if (recorder != null) return true;
-        // 优先用 VOICE_RECOGNITION：专为语音识别设计，不做通话那套 AGC/降噪
-        int[] sources = {
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                MediaRecorder.AudioSource.MIC,
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION
-        };
+        // 放歌时优先 VOICE_COMMUNICATION：系统会做回声消除，减少把歌喂给 ASR
+        // 平时优先 VOICE_RECOGNITION：不做通话那套 AGC/降噪，识别更自然
+        boolean wantAec = musicMode;
+        int[] sources = wantAec
+                ? new int[]{
+                        MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                        MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                        MediaRecorder.AudioSource.MIC}
+                : new int[]{
+                        MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                        MediaRecorder.AudioSource.MIC,
+                        MediaRecorder.AudioSource.VOICE_COMMUNICATION};
         int[] rates = {16000, 44100};
         for (int src : sources) {
             for (int r : rates) {
@@ -590,8 +617,8 @@ public class VoiceService extends Service {
                 }
                 sampleRate = r;
                 recorder = ar;
-                // 只有退回通话源时，才需要系统那套回声/降噪
-                if (src == MediaRecorder.AudioSource.VOICE_COMMUNICATION) {
+                recorderAec = wantAec;
+                if (wantAec) {
                     try {
                         if (AcousticEchoCanceler.isAvailable()) {
                             aec = AcousticEchoCanceler.create(ar.getAudioSessionId());
@@ -613,7 +640,7 @@ public class VoiceService extends Service {
                     releaseRecorder();
                     continue;
                 }
-                Log.i(TAG, "麦克风就绪 src=" + src + " " + r + "Hz");
+                Log.i(TAG, "麦克风就绪 src=" + src + " " + r + "Hz aec=" + wantAec);
                 return true;
             }
         }
