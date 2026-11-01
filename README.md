@@ -91,7 +91,13 @@ docker compose pull
 docker compose up -d
 ```
 
-1Panel 用法：把 `docker-compose.yml` 放到 `/opt/1panel/docker/compose/xiaodu-brain/`，配置放在同目录的 `config/config.yaml`。
+1Panel 用法：把 `docker-compose.yml` 放到 `/opt/1panel/docker/compose/xiaodu-brain/`，配置放在同目录的 `config/config.yaml`（也可以直接上传旧服务器的 `server/config.yaml`）。
+
+HA 的长期令牌不要写进 `config.yaml`，放同目录 `.env`：
+
+```bash
+echo 'HA_TOKEN=你的令牌' > .env
+```
 
 `docker-compose.yml` 默认 `network_mode: host`：设备 UDP 自动发现和音频地址都正常。如果必须用 bridge，启用 `ports`，并把 `config.yaml` 里的 `server.public_url` 改成 `http://<Docker宿主机IP>:8765`。
 

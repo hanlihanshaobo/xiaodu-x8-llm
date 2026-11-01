@@ -22,6 +22,11 @@ services:
     restart: unless-stopped
     command: ["python", "server/run.py", "-c", "/app/config/config.yaml"]
 
+    # HA 长期令牌放同目录 .env，不要写进 config.yaml 或提交到 git：
+    #   echo 'HA_TOKEN=你的令牌' > .env
+    environment:
+      - HA_TOKEN=${HA_TOKEN:-}
+
     # Linux / 1Panel 推荐 host 网络：
     #   - 设备 UDP 8766 自动发现能用
     #   - 容器里探测到的局域网 IP 就是宿主机 IP，音频地址不会指到容器内网
