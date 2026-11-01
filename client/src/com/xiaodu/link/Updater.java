@@ -57,18 +57,20 @@ public final class Updater {
                     long id = o.optLong("id");
                     String name = o.optString("name", o.optString("tag_name"));
                     String url = null;
+                    long version = id;      // 覆盖发布时 release id 不变，用 asset id 更准
                     JSONArray assets = o.optJSONArray("assets");
                     if (assets != null) {
                         for (int i = 0; i < assets.length(); i++) {
                             JSONObject a = assets.getJSONObject(i);
                             if (a.optString("name").endsWith(".apk")) {
                                 url = a.optString("browser_download_url");
+                                version = a.optLong("id", id);
                                 break;
                             }
                         }
                     }
-                    boolean newer = id > Prefs.updateId(c);
-                    cb.onResult(true, name, url, id, newer);
+                    boolean newer = version > Prefs.updateId(c);
+                    cb.onResult(true, name, url, version, newer);
                 } catch (Exception e) {
                     cb.onResult(false, "检查失败：" + e.getMessage(), null, 0, false);
                 }
