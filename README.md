@@ -95,13 +95,7 @@ docker compose up -d
 
 HA 长期令牌直接填在 `config/config.yaml` 的 `ha.token`（这个文件不进 git，挂载时只读，不会上传）。
 
-`docker-compose.yml` 默认 `network_mode: host`：设备 UDP 自动发现和音频地址都正常。如果 host 网络不能用，叠加 `docker-compose.bridge.yml` 单独暴露端口：
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.bridge.yml up -d
-```
-
-此时必须把 `config.yaml` 里的 `server.public_url` 改成 `http://<Docker宿主机IP>:8765`，并且设备端建议手动填服务器地址（bridge 下 UDP 广播通常过不了）。
+`docker-compose.yml` 默认 `network_mode: host`：设备 UDP 自动发现和音频地址都正常。如果 host 网络不能用，把 `network_mode: host` 注释掉，取消注释文件里的 `ports`（8765 / 8766）即可；同时必须把 `config.yaml` 里的 `server.public_url` 改成 `http://<Docker宿主机IP>:8765`，并且设备端建议手动填服务器地址（bridge 下 UDP 广播通常过不了）。
 
 > 如果挂载时报 `not a directory` / `Are you trying to mount a directory onto a file`，说明 `config.yaml` 没准备好，Docker 把路径先建成了目录。先按上面的命令生成 `config/config.yaml` 再启动。
 >

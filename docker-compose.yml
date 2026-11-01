@@ -29,8 +29,10 @@ services:
     #   - 容器里探测到的局域网 IP 就是宿主机 IP，音频地址不会指到容器内网
     network_mode: host
 
-    # 备用：不用 host 网络时，叠加 docker-compose.bridge.yml 单独暴露端口：
-    #   docker compose -f docker-compose.yml -f docker-compose.bridge.yml up -d
+    # 备用：如果 host 网络不可用，注释掉上面的 network_mode，启用下面 ports：
+    # ports:
+    #   - "8765:8765"
+    #   - "8766:8766/udp"
     # 同时把 config.yaml 里的 server.public_url 改成 http://<Docker宿主机局域网IP>:8765
 
     volumes:
