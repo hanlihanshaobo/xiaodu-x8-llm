@@ -18,7 +18,6 @@ import uuid
 import wave
 
 import numpy as np
-import sherpa_onnx
 
 log = logging.getLogger("audio")
 
@@ -194,6 +193,9 @@ class LocalASR:
     """sherpa-onnx SenseVoice，模型不在时不构造。"""
 
     def __init__(self, cfg):
+        # 放到这里再导入：不用本地 ASR 的机器（比如 32 位 ARM 镜像）可以完全不装它
+        import sherpa_onnx
+
         d = str(cfg.model_dir)
         self._rec = sherpa_onnx.OfflineRecognizer.from_sense_voice(
             model=f"{d}/model.int8.onnx",
