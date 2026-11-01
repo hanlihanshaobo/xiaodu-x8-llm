@@ -165,12 +165,19 @@ async def handle_ws(request: web.Request) -> web.WebSocketResponse:
     brain: Brain = request.app["brain"]
     ws = web.WebSocketResponse(heartbeat=25, max_msg_size=2 * 1024 * 1024)
     await ws.prepare(request)
-    # 用设备实际连进来的本地地址拼 TTS 链接，多网卡时才不会指错
-    try:
-        local_ip = request.transport.get_extra_info("sockname")[0]
-    except Exception:
-        local_ip = lan_ip()
-    public_url = f"http://{local_ip}:{request.app['port']}"
+    # 优先用 config.yaml 里显式配置的 public_url：
+    # Docker bridge 下 socket 本地地址是 172.17.0.2，设备根本访问不到。
+    configured = str(getattr(brain.cfg.server, "public_url", "") or "").strip()
+    if configured:
+        public_url = configured.rstrip("/")
+    else:
+        # 没配置时按设备实际连进来的本地地址拼，多网卡/host 网络下最准
+        try:
+            local_ip = request.transport.get_extra_info("sockname")[0]
+        except Exception:
+            local_ip = lan_ip()
+        public_url = f"http://{local_ip}:{request.app['port']}"
+    log.info("WS 音频地址 %s（客户端 %s）", public_url, request.remote)
     session = Session(ws, brain, public_url, remote=request.remote or "?")
     request.app["sessions"].add(session)
     try:
