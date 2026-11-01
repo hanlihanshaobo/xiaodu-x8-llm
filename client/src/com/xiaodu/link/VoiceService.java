@@ -641,6 +641,7 @@ public class VoiceService extends Service {
                     continue;
                 }
                 Log.i(TAG, "麦克风就绪 src=" + src + " " + r + "Hz aec=" + wantAec);
+                postLog("麦克风 " + (wantAec ? "AEC" : "普通") + " src=" + src + " " + r + "Hz");
                 return true;
             }
         }
