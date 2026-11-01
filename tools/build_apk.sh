@@ -42,7 +42,8 @@ java -cp "$BT/lib/d8.jar" com.android.tools.r8.D8 \
 
 echo "5/6 打包"
 cp build/base.apk build/unsigned.apk
-(cd build && zip -q unsigned.apk dex/classes.dex)
+# -j 去掉目录层级：dex 必须位于 APK 根目录，否则安装后无法启动
+(cd build && zip -qj unsigned.apk dex/classes.dex)
 "$BT/zipalign" -p -f 4 build/unsigned.apk build/aligned.apk
 
 echo "6/6 签名"
