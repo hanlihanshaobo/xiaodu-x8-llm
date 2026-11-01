@@ -140,18 +140,14 @@ ha:
   # 口头叫法 → 实体 ID。房间名没录进 HA 时靠这个最省事，优先级最高。
   # 跑 python tools/ha_devices.py 可以列出全部实体，照抄即可。
   aliases: {}
-  #  客厅灯: light.example_light
-  #  卧室灯: light.example_bedside_light
+  #  客厅灯: light.your_light_entity
+  #  卧室灯: light.your_bedside_light_entity
 
   # 播报用的名字，覆盖 HA 里的 friendly_name。短一点，念着舒服。
-  names:
-    light.example_light: 卧室灯
-    light.example_bedside_light: 卧室床头灯
-    light.example_chamber_light: 打印机仓灯
-    climate.example_ac: 空调
-    humidifier.example_humidifier: 加湿器
-    switch.example_water_heater: 热水器
-    switch.example_printer: 打印机
+  names: {}
+  #  light.your_light_entity: 客厅灯
+  #  climate.your_ac_entity: 空调
+  #  humidifier.your_humidifier_entity: 加湿器
 
 music:
   enabled: true

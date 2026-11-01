@@ -1,7 +1,7 @@
 """Home Assistant 接入：实体发现、名字匹配、服务调用。
 
 小度说的"把客厅灯打开"，难点不在调 API，而在把这句话对上
-`light.example_light`。这里分三层：
+`light.your_light_entity`。这里分三层：
 
   1. aliases   —— config 里手写的口头叫法，优先级最高、最省心
   2. area      —— 从 HA 模板接口取实体所在区域，拼成"客厅 主灯"
