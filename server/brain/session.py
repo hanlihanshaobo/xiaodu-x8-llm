@@ -89,6 +89,7 @@ class Session:
         self._turn_started = 0.0
         self._played: list[dict] = []
         self._music_active = False
+        self._next_item: dict | None = None
 
     # ---------- 基础设施 ----------
 
@@ -458,13 +459,14 @@ class Session:
         self._played.append(item)
         if len(self._played) > 20:
             self._played.pop(0)
+        asyncio.create_task(self._prepare_next())
         log.info("[%s] 下发音乐 %s -> %s", self.remote, item["title"],
                  f"{self.public_url}/music/{item['path']}")
         self.brain.log_turn(self.remote, query, f"{say}〔播放 {item['title']}〕")
         self.conv_until = time.time() + float(self.cfg.wake.follow_up_seconds)
 
-    async def _auto_next(self) -> None:
-        """自然放完 / 点下一首：直接接一首新的，不播报歌名。"""
+    async def _prepare_next(self) -> None:
+        """提前把下一首准备好并让设备先下载，切歌时不用等。"""
         try:
             last = self._played[-1]["title"] if self._played else ""
             res = None
@@ -476,7 +478,6 @@ class Session:
                     break
             audio = (res or {}).get("audio")
             if not audio:
-                self._settle_state()
                 return
             item = {
                 "path": audio.name,
@@ -485,11 +486,47 @@ class Session:
                 "lrc": res.get("lrc", ""),
                 "pic": res.get("pic", ""),
             }
+            self._next_item = item
+            await self.send({
+                "type": "preload",
+                "url": f"{self.public_url}/music/{item['path']}",
+                "title": item["title"],
+            })
+            log.info("[%s] 预加载下一首：%s", self.remote, item["title"])
+        except Exception as e:
+            log.info("预加载失败：%s", e)
+
+    async def _auto_next(self) -> None:
+        """自然放完 / 点下一首：直接接一首新的，不播报歌名。"""
+        try:
+            item = self._next_item
+            self._next_item = None
+            if not item:
+                last = self._played[-1]["title"] if self._played else ""
+                res = None
+                for _ in range(3):
+                    res = await self.brain.music.handle("放首歌")
+                    if not res.get("audio"):
+                        break
+                    if res.get("title") != last:
+                        break
+                audio = (res or {}).get("audio")
+                if not audio:
+                    self._settle_state()
+                    return
+                item = {
+                    "path": audio.name,
+                    "title": res.get("title", ""),
+                    "artist": res.get("artist", ""),
+                    "lrc": res.get("lrc", ""),
+                    "pic": res.get("pic", ""),
+                }
             await self._emit_music(item)
             self._played.append(item)
             if len(self._played) > 20:
                 self._played.pop(0)
             log.info("[%s] 自动下一首：%s", self.remote, item["title"])
+            asyncio.create_task(self._prepare_next())
         except Exception as e:
             log.warning("自动下一首失败：%s", e)
             self._settle_state()

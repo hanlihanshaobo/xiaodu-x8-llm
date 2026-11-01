@@ -616,7 +616,7 @@ public class MainActivity extends Activity implements Bus.Listener {
                     @Override
                     public void run() {
                         final String addr = host + ":" + port;
-                        new AlertDialog.Builder(MainActivity.this)
+                        dialog()
                                 .setTitle("发现服务端")
                                 .setMessage("地址：" + addr + "\n是否连接并记住？")
                                 .setPositiveButton("连接", new DialogInterface.OnClickListener() {
@@ -868,10 +868,16 @@ public class MainActivity extends Activity implements Bus.Listener {
 
     // ---------------- 接管麦克风 ----------------
 
+    private AlertDialog.Builder dialog() {
+        // 对话框跟着主题走，否则浅色模式会把深色文字画在深色背景上
+        int theme = dark ? android.R.style.Theme_DeviceDefault_Dialog_Alert
+                : android.R.style.Theme_DeviceDefault_Light_Dialog_Alert;
+        return new AlertDialog.Builder(this, theme);
+    }
+
     private void showTakeover() {
         TextView text = new TextView(this);
         text.setTextSize(19);
-        text.setTextColor(cText);
         text.setPadding(dp(20), dp(16), dp(20), dp(8));
         text.setLineSpacing(dp(6), 1f);
         text.setText("关掉原生小度的唤醒，这里才能独占麦克风。\n\n"
@@ -879,9 +885,9 @@ public class MainActivity extends Activity implements Bus.Listener {
                 + "其它办法：\n"
                 + "· 屏幕顶部下拉 → 禁用唤醒\n"
                 + "· 设置 → 隐私 → 语音唤醒 → 关闭\n"
-                + "· 或把我的「选择应用」打开，关掉小度的麦克风权限");
+                + "· 或点「选择应用」，关掉小度的麦克风权限");
 
-        new AlertDialog.Builder(this)
+        dialog()
                 .setTitle("接管麦克风")
                 .setView(text)
                 .setPositiveButton("选择应用", new DialogInterface.OnClickListener() {
@@ -915,7 +921,7 @@ public class MainActivity extends Activity implements Bus.Listener {
         }
         String[] names = new String[list.size()];
         for (int i = 0; i < list.size(); i++) names[i] = list.get(i)[1] + "\n" + list.get(i)[0];
-        new AlertDialog.Builder(this)
+        dialog()
                 .setTitle("选择要关闭的应用")
                 .setItems(names, new DialogInterface.OnClickListener() {
                     @Override

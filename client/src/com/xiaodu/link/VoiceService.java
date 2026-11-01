@@ -61,6 +61,7 @@ public class VoiceService extends Service {
         super.onCreate();
         INSTANCE = this;
         installCrashHandler();
+        cleanCache();
         player = new Player(new Player.Callback() {
             @Override
             public void onDone(String id) {
@@ -78,13 +79,6 @@ public class VoiceService extends Service {
                     }
                 });
                 if (!player.isBusy()) muted = false;
-                // 播完就删本地缓存，8G 的存储别攒垃圾
-                try {
-                    new java.io.File(getCacheDir(), "m_" + id + ".mp3").delete();
-                    new java.io.File(getCacheDir(), "m_" + id + ".flac").delete();
-                    new java.io.File(getCacheDir(), "m_" + id + ".m4a").delete();
-                } catch (Exception ignored) {
-                }
             }
 
             @Override
@@ -297,6 +291,40 @@ public class VoiceService extends Service {
         }
     }
 
+    /** 用 URL 的哈希做缓存名：预加载和正式播放能对上同一个文件 */
+    private String cacheName(String url) {
+        String u = url == null ? "" : url;
+        String lower = u.toLowerCase();
+        String ext = lower.contains(".flac") ? ".flac"
+                : (lower.contains(".m4a") || lower.contains(".m4s")) ? ".m4a" : ".mp3";
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
+            byte[] d = md.digest(u.getBytes("UTF-8"));
+            StringBuilder sb = new StringBuilder("m_");
+            for (int i = 0; i < 8; i++) sb.append(String.format("%02x", d[i]));
+            return sb.toString() + ext;
+        } catch (Exception e) {
+            return "m_" + Math.abs(u.hashCode()) + ext;
+        }
+    }
+
+    /** 清掉两天前的歌曲缓存，避免把 8G 存储塞满 */
+    private void cleanCache() {
+        final long cutoff = System.currentTimeMillis() - 2L * 24 * 3600 * 1000;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                java.io.File[] fs = getCacheDir().listFiles();
+                if (fs == null) return;
+                for (java.io.File f : fs) {
+                    if (f.getName().startsWith("m_") && f.lastModified() < cutoff) {
+                        f.delete();
+                    }
+                }
+            }
+        }, "cache-clean").start();
+    }
+
     private void postLog(final String text) {
         netExec.execute(new Runnable() {
             @Override
@@ -410,24 +438,36 @@ public class VoiceService extends Service {
                 Bus.post("music", text);   // 先切界面
                 final String mid = o.optString("id");
                 final String murl = o.optString("url");
-                // 先落到本地再播：设备的 MediaPlayer 直接拉 10MB 的 HTTP 流会失败
-                netExec.execute(new Runnable() {
-                    @Override
-                    public void run() {
-                        String lower = murl.toLowerCase();
-                        String ext = lower.contains(".flac") ? ".flac"
-                                : (lower.contains(".m4a") || lower.contains(".m4s")) ? ".m4a" : ".mp3";
-                        java.io.File f = new java.io.File(getCacheDir(), "m_" + mid + ext);
-                        boolean ok = f.exists() && f.length() > 100_000;
-                        if (!ok) ok = download(murl, f);
-                        if (ok) {
-                            player.enqueue(mid, f.getAbsolutePath());
-                        } else {
-                            Bus.post("play_error", "音频下载失败");
-                            postLog("音乐下载失败 " + murl);
+                final java.io.File f = new java.io.File(getCacheDir(), cacheName(murl));
+                if (f.exists() && f.length() > 100_000) {
+                    player.enqueue(mid, f.getAbsolutePath());   // 预加载命中，秒开
+                } else {
+                    netExec.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (download(murl, f)) {
+                                player.enqueue(mid, f.getAbsolutePath());
+                            } else {
+                                Bus.post("play_error", "音频下载失败");
+                                postLog("音乐下载失败 " + murl);
+                            }
                         }
+                    });
+                }
+            } else if ("preload".equals(type)) {
+                // 下一首提前下载，切歌时直接用本地文件
+                final String purl = o.optString("url");
+                if (!purl.isEmpty()) {
+                    final java.io.File pf = new java.io.File(getCacheDir(), cacheName(purl));
+                    if (!(pf.exists() && pf.length() > 100_000)) {
+                        netExec.execute(new Runnable() {
+                            @Override
+                            public void run() {
+                                download(purl, pf);
+                            }
+                        });
                     }
-                });
+                }
             } else if ("volume".equals(type)) {
                 try {
                     AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
