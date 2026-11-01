@@ -1,0 +1,17 @@
+# 小度 X8 服务端
+#   1. 复制 server/config.example.yaml 为 server/config.yaml 并填好
+#   2. docker compose up -d --build
+services:
+  xiaodu-brain:
+    build: .
+    image: xiaodu-x8-llm:latest
+    container_name: xiaodu-brain
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./server/config.yaml:/app/server/config.yaml:ro
+      - ./data/cache:/app/server/cache
+      - ./data/logs:/app/server/logs
+    # 需要访问局域网里的 ASR/LLM/TTS/Navidrome/HA，用 host 网络时更省事
+    # network_mode: host

@@ -1,0 +1,13 @@
+.git
+.gitignore
+**/__pycache__
+**/*.pyc
+server/cache
+server/logs
+server/config.yaml
+client
+tools
+docs
+dist
+data
+*.md
