@@ -260,13 +260,25 @@ public class VoiceService extends Service {
 
     /** 把整首歌拉到本地，失败返回 false */
     private boolean download(String url, java.io.File out) {
+        return download(url, out, 100_000, 8000, 30000);
+    }
+
+    /** 语音文件很小，阈值和超时都单独放宽/收紧 */
+    private boolean downloadTts(String url, java.io.File out) {
+        return download(url, out, 1000, 4000, 15000);
+    }
+
+    private boolean download(String url, java.io.File out, long minBytes,
+                             int connectMs, int readMs) {
         java.io.InputStream in = null;
         java.io.FileOutputStream fos = null;
         try {
+            java.io.File parent = out.getParentFile();
+            if (parent != null && !parent.exists()) parent.mkdirs();
             java.net.HttpURLConnection c =
                     (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
-            c.setConnectTimeout(8000);
-            c.setReadTimeout(30000);
+            c.setConnectTimeout(connectMs);
+            c.setReadTimeout(readMs);
             c.setRequestProperty("User-Agent", "XiaoduLink/1.0");
             c.connect();
             if (c.getResponseCode() >= 400) {
@@ -279,7 +291,7 @@ public class VoiceService extends Service {
             int n;
             while ((n = in.read(buf)) > 0) fos.write(buf, 0, n);
             fos.flush();
-            return out.length() > 100_000;
+            return out.length() > minBytes;
         } catch (Exception e) {
             Log.w(TAG, "下载失败: " + e);
             out.delete();
@@ -320,6 +332,13 @@ public class VoiceService extends Service {
         new Thread(new Runnable() {
             @Override
             public void run() {
+                java.io.File ttsDir = new java.io.File(getCacheDir(), "tts");
+                java.io.File[] tts = ttsDir.listFiles();
+                if (tts != null) {
+                    for (java.io.File f : tts) {
+                        if (f.lastModified() < cutoff) f.delete();
+                    }
+                }
                 java.io.File[] fs = getCacheDir().listFiles();
                 if (fs == null) return;
                 java.util.ArrayList<java.io.File> songs = new java.util.ArrayList<>();
@@ -359,6 +378,23 @@ public class VoiceService extends Service {
                     JSONObject o = new JSONObject();
                     o.put("type", "log");
                     o.put("text", text);
+                    Ws w = ws;
+                    if (w != null) w.sendText(o.toString());
+                } catch (Exception ignored) {
+                }
+            }
+        });
+    }
+
+    /** 语音根本没播出来时，也要给服务端回执，清掉它的 pending */
+    private void sendSpeakDone(final String id) {
+        netExec.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    JSONObject o = new JSONObject();
+                    o.put("type", "speak_done");
+                    o.put("id", id);
                     Ws w = ws;
                     if (w != null) w.sendText(o.toString());
                 } catch (Exception ignored) {
@@ -463,7 +499,29 @@ public class VoiceService extends Service {
                 Bus.post("reply", o.optString("delta"));
             } else if ("speak".equals(type)) {
                 muted = true;
-                player.enqueueSpeech(o.optString("id"), o.optString("url"));
+                final String sid = o.optString("id");
+                final String surl = o.optString("url");
+                final java.io.File ttsDir = new java.io.File(getCacheDir(), "tts");
+                if (!ttsDir.exists()) ttsDir.mkdirs();
+                final java.io.File sf = new java.io.File(ttsDir, cacheName(surl));
+                if (sf.exists() && sf.length() > 1000) {
+                    player.enqueueSpeech(sid, sf.getAbsolutePath());
+                } else {
+                    netExec.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (downloadTts(surl, sf)) {
+                                player.enqueueSpeech(sid, sf.getAbsolutePath());
+                            } else {
+                                // 语音下载失败时不能一直闭麦，否则用户后面说什么都听不到
+                                muted = false;
+                                Bus.post("error", "语音下载失败");
+                                postLog("语音下载失败 " + surl);
+                                sendSpeakDone(sid);
+                            }
+                        }
+                    });
+                }
                 Bus.post("speak", o.optString("text"));
             } else if ("music".equals(type)) {
                 musicMode = true;

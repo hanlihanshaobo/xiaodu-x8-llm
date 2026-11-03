@@ -30,9 +30,10 @@ SENT_END = "。！？!?；;\n"
 PAUSE = "，,、：:"
 _NOISE = re.compile(r"[\s，。！？、；：,.!?;:…—\-~\"'“”‘’()（）]+")
 _LEAD = re.compile(r"^[，。！？、；：,.!?;:\s]+")
+_WAKE_FILLER = re.compile(r"^(?:嗯|啊|呃|哎|诶)+")
 
 # 常见同音误识别，放宽一点点
-WAKE_ALIASES = {"小杜": "小度", "小渡": "小度"}
+WAKE_ALIASES = {"小杜": "小度", "小渡": "小度", "小豆": "小度"}
 
 # 看起来像指令的词：只有这些才值得多花一次模型调用做意图解析
 _CMD_WORDS = (
@@ -403,11 +404,12 @@ class Session:
 
     def _strip_wake(self, norm: str) -> tuple[str, bool]:
         words = sorted(self.cfg.wake.words, key=len, reverse=True)
+        # 只认句首的唤醒词：手机/电脑里的“小度”出现在句子中间时不再误触发
+        base = _WAKE_FILLER.sub("", norm)
         for w in words:
             key = _norm(w)
-            idx = norm.find(key)
-            if idx >= 0:
-                rest = norm[idx + len(key):]
+            if key and base.startswith(key):
+                rest = base[len(key):]
                 return _LEAD.sub("", rest), True
         return norm, False
 
