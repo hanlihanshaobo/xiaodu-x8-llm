@@ -333,7 +333,7 @@ public class MainActivity extends Activity implements Bus.Listener {
     private void buildMusic() {
         musicView = new LinearLayout(this);
         musicView.setOrientation(LinearLayout.VERTICAL);
-        musicView.setPadding(dp(6), dp(12), dp(6), dp(6));
+        musicView.setPadding(dp(6), dp(12), dp(6), dp(20));
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
