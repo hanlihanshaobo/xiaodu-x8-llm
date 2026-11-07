@@ -138,6 +138,7 @@ class Session:
         self._music_active = False
         self._music_id: str | None = None
         self._next_item: dict | None = None
+        self._prepare_task: asyncio.Task | None = None
         self._speech_ids: set[str] = set()
         self._music_result: dict | None = None
         self.quality = "auto"
@@ -693,7 +694,7 @@ class Session:
                 item = self._played.pop()   # 回到上一首
                 await self._emit_music(item)
                 self._played.append(item)
-                asyncio.create_task(self._prepare_next())
+                self._queue_prepare_next()
                 self._settle_state()
                 return
             await self._say("已经是第一首了。")
@@ -717,7 +718,7 @@ class Session:
         self._played.append(item)
         if len(self._played) > 20:
             self._played.pop(0)
-        asyncio.create_task(self._prepare_next())
+        self._queue_prepare_next()
         log.info("[%s] 下发音乐 %s -> %s", self.remote, item["title"],
                  f"{self.public_url}/music/{item['path']}")
         self.brain.log_turn(self.remote, query, f"{say}〔播放 {item['title']}〕")
@@ -732,7 +733,7 @@ class Session:
         self._played.append(item)
         if len(self._played) > 20:
             self._played.pop(0)
-        asyncio.create_task(self._prepare_next())
+        self._queue_prepare_next()
         log.info("[%s] 模型点歌：%s - %s", self.remote,
                  item.get("title", ""), item.get("artist", ""))
 
@@ -785,10 +786,17 @@ class Session:
                 item = self._played.pop()
                 await self._emit_music(item)
                 self._played.append(item)
-                asyncio.create_task(self._prepare_next())
+                self._queue_prepare_next()
                 return "已回到上一首。"
             return "已经是第一首了。"
         return "不支持的音乐操作。"
+
+    def _queue_prepare_next(self) -> None:
+        """取消旧的预加载，重新准备下一首，避免两个任务互相覆盖。"""
+        if self._prepare_task and not self._prepare_task.done():
+            self._prepare_task.cancel()
+        self._next_item = None
+        self._prepare_task = asyncio.create_task(self._prepare_next())
 
     async def _prepare_next(self) -> None:
         """提前把下一首准备好并让设备先下载，切歌时不用等。"""
@@ -826,6 +834,14 @@ class Session:
         try:
             item = self._next_item
             self._next_item = None
+            if not item and self._prepare_task and not self._prepare_task.done():
+                # 用户点下一首时预加载可能还在跑：等它一下，比重新搜歌快
+                try:
+                    await asyncio.wait_for(asyncio.shield(self._prepare_task), timeout=8)
+                except Exception:
+                    pass
+                item = self._next_item
+                self._next_item = None
             if not item:
                 last = self._played[-1]["title"] if self._played else ""
                 res = None
@@ -851,7 +867,7 @@ class Session:
             if len(self._played) > 20:
                 self._played.pop(0)
             log.info("[%s] 自动下一首：%s", self.remote, item["title"])
-            asyncio.create_task(self._prepare_next())
+            self._queue_prepare_next()
         except Exception as e:
             log.warning("自动下一首失败：%s", e)
             self._settle_state()

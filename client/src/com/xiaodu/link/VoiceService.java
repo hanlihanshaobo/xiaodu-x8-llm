@@ -582,6 +582,11 @@ public class VoiceService extends Service {
                     netExec.execute(new Runnable() {
                         @Override
                         public void run() {
+                            // 预加载任务可能刚跑完，这里再看一次，避免重复下载
+                            if (f.exists() && f.length() > 100_000) {
+                                player.enqueueMusic(mid, f.getAbsolutePath());
+                                return;
+                            }
                             if (download(murl, f)) {
                                 player.enqueueMusic(mid, f.getAbsolutePath());
                                 cleanCache();          // 下完就按阈值清一次
@@ -601,7 +606,10 @@ public class VoiceService extends Service {
                         netExec.execute(new Runnable() {
                             @Override
                             public void run() {
-                                download(purl, pf);
+                                // 正式播放可能已经下好了，避免再下一遍
+                                if (!(pf.exists() && pf.length() > 100_000)) {
+                                    download(purl, pf);
+                                }
                                 cleanCache();
                             }
                         });
