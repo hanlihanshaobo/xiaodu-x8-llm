@@ -8,6 +8,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -58,9 +59,12 @@ public class MainActivity extends Activity implements Bus.Listener {
     private ImageView npCover;
     private TextView npTitle, npArtist, npLyric, npTime;
     private SeekBar npProgress;
+    private SeekBar npVolume;
+    private TextView npVolumePct;
     private Button npPlayBtn;
     private boolean npDragging, npPlaying, npHasTrack;
     private int npLastIdx = -1;
+    private long npSkipAt;
     private final ArrayList<Long> npTimes = new ArrayList<>();
     private final ArrayList<String> npLines = new ArrayList<>();
     private final Handler npHandler = new Handler();
@@ -281,10 +285,23 @@ public class MainActivity extends Activity implements Bus.Listener {
             @Override
             public void onClick(View v) {
                 VoiceService svc = VoiceService.INSTANCE;
-                if (svc != null) svc.stopPlayback();   // 本地立即停，同时通知服务端别再续播
-                setStatus("已停止");
-                subtitle.setText("");
-                Toast.makeText(MainActivity.this, "已停止播放", Toast.LENGTH_SHORT).show();
+                if (svc == null) {
+                    Toast.makeText(MainActivity.this, "语音服务还没启动", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (svc.isMusicPlaying()) {
+                    svc.pausePlayback();
+                    setStatus("已暂停");
+                    Toast.makeText(MainActivity.this, "已暂停", Toast.LENGTH_SHORT).show();
+                } else if (svc.hasMusic()) {
+                    svc.resumePlayback();
+                    setStatus("正在播放");
+                    Toast.makeText(MainActivity.this, "继续播放", Toast.LENGTH_SHORT).show();
+                } else {
+                    svc.sendCommand("放首歌");
+                    setStatus("正在找歌…");
+                    Toast.makeText(MainActivity.this, "正在找歌…", Toast.LENGTH_SHORT).show();
+                }
             }
         });
         assistantView.addView(ring, new LinearLayout.LayoutParams(dp(250), dp(250)));
@@ -392,26 +409,33 @@ public class MainActivity extends Activity implements Bus.Listener {
         ctrl.addView(smallButton("上一首", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                send("上一首");
+                skipTo("上一首");
             }
         }));
         npPlayBtn = smallButton("播放", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (!npHasTrack) {
+                VoiceService svc = VoiceService.INSTANCE;
+                if (!npHasTrack || svc == null || !svc.hasMusic()) {
                     send("放首歌");
                     return;
                 }
-                npPlaying = !npPlaying;
-                ((Button) v).setText(npPlaying ? "暂停" : "播放");
-                send(npPlaying ? "暂停" : "继续放");
+                if (svc.isMusicPlaying()) {
+                    svc.pausePlayback();
+                    npPlaying = false;
+                    ((Button) v).setText("播放");
+                } else {
+                    svc.resumePlayback();
+                    npPlaying = true;
+                    ((Button) v).setText("暂停");
+                }
             }
         });
         ctrl.addView(npPlayBtn);
         ctrl.addView(smallButton("下一首", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                send("下一首");
+                skipTo("下一首");
             }
         }));
         ctrl.addView(smallButton("停止", new View.OnClickListener() {
@@ -452,6 +476,71 @@ public class MainActivity extends Activity implements Bus.Listener {
         npTime.setTextColor(cSub);
         npTime.setTextSize(13);
         ctrl.addView(npTime);
+
+        // 音量控制：直接调系统媒体音量，点下去立即生效
+        LinearLayout volRow = new LinearLayout(this);
+        volRow.setOrientation(LinearLayout.HORIZONTAL);
+        volRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams vrp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        vrp.topMargin = dp(2);
+        musicView.addView(volRow, vrp);
+
+        TextView volLabel = new TextView(this);
+        volLabel.setText("音量");
+        volLabel.setTextColor(cSub);
+        volLabel.setTextSize(13);
+        volRow.addView(volLabel);
+
+        npVolume = new SeekBar(this);
+        npVolume.setMax(100);
+        npVolume.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                if (!fromUser) return;
+                AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+                if (am != null) {
+                    int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                    int v = Math.round(progress / 100f * max);
+                    am.setStreamVolume(AudioManager.STREAM_MUSIC, v, 0);
+                }
+                if (npVolumePct != null) npVolumePct.setText(progress + "%");
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar bar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar bar) {
+            }
+        });
+        LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        vlp.leftMargin = dp(8);
+        vlp.rightMargin = dp(8);
+        volRow.addView(npVolume, vlp);
+
+        npVolumePct = new TextView(this);
+        npVolumePct.setText("50%");
+        npVolumePct.setTextColor(cSub);
+        npVolumePct.setTextSize(13);
+        npVolumePct.setGravity(Gravity.END);
+        npVolumePct.setMinWidth(dp(40));
+        volRow.addView(npVolumePct);
+
+        syncVolumeBar();
+    }
+
+    private void syncVolumeBar() {
+        if (npVolume == null) return;
+        AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+        if (am == null) return;
+        int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        int cur = am.getStreamVolume(AudioManager.STREAM_MUSIC);
+        int pct = max > 0 ? Math.round(cur * 100f / max) : 0;
+        npVolume.setProgress(pct);
+        if (npVolumePct != null) npVolumePct.setText(pct + "%");
     }
 
     private Button smallButton(String text, View.OnClickListener l) {
@@ -785,6 +874,16 @@ public class MainActivity extends Activity implements Bus.Listener {
         if (svc != null) svc.sendCommand(cmd);
     }
 
+    /** 上一首/下一首：先给界面一个即时反馈，避免看起来没反应 */
+    private void skipTo(String cmd) {
+        long now = System.currentTimeMillis();
+        if (now - npSkipAt < 800) return;
+        npSkipAt = now;
+        if (npTitle != null) npTitle.setText("正在切歌…");
+        if (npArtist != null) npArtist.setText("");
+        send(cmd);
+    }
+
     // ---------------- 连接 ----------------
 
     private void connectOrDiscover() {
@@ -906,9 +1005,20 @@ public class MainActivity extends Activity implements Bus.Listener {
         } else if ("paused".equals(type)) {
             npPlaying = false;
             if (npPlayBtn != null) npPlayBtn.setText("播放");
+            setStatus("已暂停");
+            if (ring != null) ring.setColor(cSub);
         } else if ("playing".equals(type)) {
             npPlaying = true;
             if (npPlayBtn != null) npPlayBtn.setText("暂停");
+            setStatus("正在播放");
+            if (ring != null) ring.setColor(cAccent);
+        } else if ("volume".equals(type)) {
+            try {
+                int pct = Integer.parseInt(payload);
+                if (npVolume != null) npVolume.setProgress(pct);
+                if (npVolumePct != null) npVolumePct.setText(pct + "%");
+            } catch (Exception ignored) {
+            }
         } else if ("play_error".equals(type)) {
             Toast.makeText(this, "播放失败：" + payload, Toast.LENGTH_LONG).show();
         } else if ("asr".equals(type)) {

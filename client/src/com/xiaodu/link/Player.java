@@ -131,6 +131,10 @@ public class Player {
     }
 
     public void stopAll() {
+        stopAll(true);
+    }
+
+    public void stopAll(final boolean notifyIdle) {
         main.post(new Runnable() {
             @Override
             public void run() {
@@ -141,7 +145,7 @@ public class Player {
                 releaseSpeech();
                 releaseMusic();
                 idleNotified = true;
-                cb.onIdle();
+                if (notifyIdle) cb.onIdle();
             }
         });
     }
@@ -153,6 +157,10 @@ public class Player {
 
     public boolean isSpeechBusy() {
         return speechMp != null || !speechQueue.isEmpty();
+    }
+
+    public boolean hasMusic() {
+        return musicMp != null;
     }
 
     public boolean isMusicPlaying() {

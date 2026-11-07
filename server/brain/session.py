@@ -669,7 +669,7 @@ class Session:
         if cmd == "next":
             self._music_active = False
             self._music_id = None
-            await self.send({"type": "stop"})
+            await self.send({"type": "stop", "silent": True})
             self._pending = 0
             self._speech_ids.clear()
             self._done_evt.set()
@@ -679,7 +679,7 @@ class Session:
         if cmd == "prev":
             self._music_active = False
             self._music_id = None
-            await self.send({"type": "stop"})
+            await self.send({"type": "stop", "silent": True})
             self._pending = 0
             self._speech_ids.clear()
             self._done_evt.set()
@@ -762,7 +762,7 @@ class Session:
         if action in ("stop", "next", "prev"):
             self._music_active = False
             self._music_id = None
-            await self.send({"type": "stop"})
+            await self.send({"type": "stop", "silent": action in ("next", "prev")})
             self._pending = 0
             self._speech_ids.clear()
             self._done_evt.set()

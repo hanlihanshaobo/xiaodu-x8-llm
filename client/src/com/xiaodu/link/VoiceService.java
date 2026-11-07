@@ -449,6 +449,29 @@ public class VoiceService extends Service {
         }
     }
 
+    public boolean isMusicPlaying() {
+        return player != null && player.isMusicPlaying();
+    }
+
+    public boolean hasMusic() {
+        return player != null && player.hasMusic();
+    }
+
+    /** 圆环/播放按钮用：本地暂停，不经过服务端，点下去立即生效 */
+    public void pausePlayback() {
+        if (player != null) player.pauseMusic();
+        musicMode = false;
+        muted = false;
+        Bus.post("paused", "");
+    }
+
+    /** 圆环/播放按钮用：本地恢复 */
+    public void resumePlayback() {
+        if (player != null) player.resumeMusic();
+        musicMode = true;
+        Bus.post("playing", "");
+    }
+
     // ---------------- 崩溃自诊断 ----------------
 
     private void installCrashHandler() {
@@ -568,6 +591,10 @@ public class VoiceService extends Service {
                                 ? AudioManager.ADJUST_RAISE : AudioManager.ADJUST_LOWER;
                         am.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir,
                                 AudioManager.FLAG_SHOW_UI);
+                        int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                        int cur = am.getStreamVolume(AudioManager.STREAM_MUSIC);
+                        int pct = max > 0 ? Math.round(cur * 100f / max) : 0;
+                        Bus.post("volume", String.valueOf(pct));
                     }
                 } catch (Exception ignored) {
                 }
@@ -584,9 +611,10 @@ public class VoiceService extends Service {
                 muted = false;
                 player.stopSpeech();
             } else if ("stop".equals(type)) {
+                boolean silent = o.optBoolean("silent");
                 muted = false;
                 musicMode = false;
-                player.stopAll();
+                player.stopAll(!silent);
                 Bus.post("state", "listening");
             } else if ("release".equals(type)) {
                 muted = false;
