@@ -493,7 +493,27 @@ public class VoiceService extends Service {
     public void setVolumePercent(int pct) {
         pct = Math.max(0, Math.min(100, pct));
         Prefs.setVolume(this, pct);
-        if (player != null) player.setGain(pct / 100f);
+        float gain = pct / 100f;
+        // 双保险：系统音量负责“真的变响/变轻”，App 增益把 15 档之间的误差补到目标值。
+        // 即使某些机型忽略 MediaPlayer.setVolume，系统音量也会按最接近的档位变化。
+        AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+        if (am != null) {
+            int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+            if (max > 0) {
+                int step = Math.round(pct * max / 100f);
+                if (pct > 0) step = Math.max(1, step);
+                if (step > 0 && step * 100f / max < pct) step = Math.min(max, step + 1);
+                step = Math.max(0, Math.min(max, step));
+                float effective = step * 100f / max;
+                if (pct <= 0) {
+                    gain = 0f;
+                } else if (effective > 0) {
+                    gain = Math.min(1f, pct / effective);
+                }
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, step, 0);
+            }
+        }
+        if (player != null) player.setGain(gain);
     }
 
     // ---------------- 崩溃自诊断 ----------------
