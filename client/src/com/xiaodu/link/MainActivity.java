@@ -58,8 +58,6 @@ public class MainActivity extends Activity implements Bus.Listener {
     private ImageView npCover;
     private TextView npTitle, npArtist, npLyric, npTime;
     private SeekBar npProgress;
-    private SeekBar npVolume;
-    private TextView npVolumePct;
     private Button npPlayBtn;
     private boolean npDragging, npPlaying, npHasTrack;
     private int npLastIdx = -1;
@@ -117,7 +115,6 @@ public class MainActivity extends Activity implements Bus.Listener {
     @Override
     protected void onResume() {
         super.onResume();
-        syncVolumeBar();
     }
 
     @Override
@@ -336,7 +333,7 @@ public class MainActivity extends Activity implements Bus.Listener {
     private void buildMusic() {
         musicView = new LinearLayout(this);
         musicView.setOrientation(LinearLayout.VERTICAL);
-        musicView.setPadding(dp(6), dp(12), dp(6), dp(14));
+        musicView.setPadding(dp(6), dp(12), dp(6), dp(6));
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
@@ -481,68 +478,6 @@ public class MainActivity extends Activity implements Bus.Listener {
         npTime.setTextColor(cSub);
         npTime.setTextSize(13);
         ctrl.addView(npTime);
-
-        // 音量控制：直接调系统媒体音量，点下去立即生效
-        LinearLayout volRow = new LinearLayout(this);
-        volRow.setOrientation(LinearLayout.HORIZONTAL);
-        volRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams vrp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        vrp.topMargin = dp(2);
-        vrp.bottomMargin = dp(2);
-        musicView.addView(volRow, vrp);
-        // 音量条挪到控制条上面，不要贴着底部
-        musicView.removeView(volRow);
-        musicView.addView(volRow, 1, vrp);
-
-        TextView volLabel = new TextView(this);
-        volLabel.setText("音量");
-        volLabel.setTextColor(cSub);
-        volLabel.setTextSize(13);
-        volRow.addView(volLabel);
-
-        npVolume = new SeekBar(this);
-        npVolume.setMax(100);
-        npVolume.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
-                if (!fromUser) return;
-                VoiceService svc = VoiceService.INSTANCE;
-                if (svc != null) svc.setVolumePercent(progress);
-                else Prefs.setVolume(MainActivity.this, progress);
-                if (npVolumePct != null) npVolumePct.setText(progress + "%");
-            }
-
-            @Override
-            public void onStartTrackingTouch(SeekBar bar) {
-            }
-
-            @Override
-            public void onStopTrackingTouch(SeekBar bar) {
-            }
-        });
-        LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        vlp.leftMargin = dp(8);
-        vlp.rightMargin = dp(8);
-        volRow.addView(npVolume, vlp);
-
-        npVolumePct = new TextView(this);
-        npVolumePct.setText("50%");
-        npVolumePct.setTextColor(cSub);
-        npVolumePct.setTextSize(13);
-        npVolumePct.setGravity(Gravity.END);
-        npVolumePct.setMinWidth(dp(40));
-        volRow.addView(npVolumePct);
-
-        syncVolumeBar();
-    }
-
-    private void syncVolumeBar() {
-        if (npVolume == null) return;
-        int pct = Math.max(0, Math.min(100, Prefs.volume(this)));
-        npVolume.setProgress(pct);
-        if (npVolumePct != null) npVolumePct.setText(pct + "%");
     }
 
     private Button smallButton(String text, View.OnClickListener l) {
@@ -1015,10 +950,10 @@ public class MainActivity extends Activity implements Bus.Listener {
             setStatus("正在播放");
             if (ring != null) ring.setColor(cAccent);
         } else if ("volume".equals(type)) {
+            // 语音调完音量只在状态栏提示一下，界面不再放音量条
             try {
                 int pct = Integer.parseInt(payload);
-                if (npVolume != null) npVolume.setProgress(pct);
-                if (npVolumePct != null) npVolumePct.setText(pct + "%");
+                setStatus("音量 " + pct + "%");
             } catch (Exception ignored) {
             }
         } else if ("play_error".equals(type)) {
@@ -1033,7 +968,6 @@ public class MainActivity extends Activity implements Bus.Listener {
             if ("connected".equals(payload)) {
                 setStatus("服务端已连接");
                 ring.setColor(cAccent);
-                syncVolumeBar();
             } else if (payload.startsWith("disconnected")) {
                 setStatus("未连接，正在重试…");
                 ring.setColor(0xFFEF4444);
