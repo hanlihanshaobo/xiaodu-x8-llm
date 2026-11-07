@@ -8,7 +8,6 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -113,6 +112,12 @@ public class MainActivity extends Activity implements Bus.Listener {
                 }
             }, 900);
         }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        syncVolumeBar();
     }
 
     @Override
@@ -331,7 +336,7 @@ public class MainActivity extends Activity implements Bus.Listener {
     private void buildMusic() {
         musicView = new LinearLayout(this);
         musicView.setOrientation(LinearLayout.VERTICAL);
-        musicView.setPadding(dp(6), dp(12), dp(6), dp(6));
+        musicView.setPadding(dp(6), dp(12), dp(6), dp(14));
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
@@ -484,7 +489,11 @@ public class MainActivity extends Activity implements Bus.Listener {
         LinearLayout.LayoutParams vrp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         vrp.topMargin = dp(2);
+        vrp.bottomMargin = dp(2);
         musicView.addView(volRow, vrp);
+        // 音量条挪到控制条上面，不要贴着底部
+        musicView.removeView(volRow);
+        musicView.addView(volRow, 1, vrp);
 
         TextView volLabel = new TextView(this);
         volLabel.setText("音量");
@@ -498,12 +507,9 @@ public class MainActivity extends Activity implements Bus.Listener {
             @Override
             public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
                 if (!fromUser) return;
-                AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
-                if (am != null) {
-                    int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-                    int v = Math.round(progress / 100f * max);
-                    am.setStreamVolume(AudioManager.STREAM_MUSIC, v, 0);
-                }
+                VoiceService svc = VoiceService.INSTANCE;
+                if (svc != null) svc.setVolumePercent(progress);
+                else Prefs.setVolume(MainActivity.this, progress);
                 if (npVolumePct != null) npVolumePct.setText(progress + "%");
             }
 
@@ -534,11 +540,7 @@ public class MainActivity extends Activity implements Bus.Listener {
 
     private void syncVolumeBar() {
         if (npVolume == null) return;
-        AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
-        if (am == null) return;
-        int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-        int cur = am.getStreamVolume(AudioManager.STREAM_MUSIC);
-        int pct = max > 0 ? Math.round(cur * 100f / max) : 0;
+        int pct = Math.max(0, Math.min(100, Prefs.volume(this)));
         npVolume.setProgress(pct);
         if (npVolumePct != null) npVolumePct.setText(pct + "%");
     }
@@ -1031,6 +1033,7 @@ public class MainActivity extends Activity implements Bus.Listener {
             if ("connected".equals(payload)) {
                 setStatus("服务端已连接");
                 ring.setColor(cAccent);
+                syncVolumeBar();
             } else if (payload.startsWith("disconnected")) {
                 setStatus("未连接，正在重试…");
                 ring.setColor(0xFFEF4444);

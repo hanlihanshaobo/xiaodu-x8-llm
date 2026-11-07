@@ -55,6 +55,19 @@ public final class Prefs {
         sp(c).edit().putString("quality", v).apply();
     }
 
+    /** App 内音量增益 0~100，默认 100（不衰减） */
+    public static int volume(Context c) {
+        return sp(c).getInt("volume", 100);
+    }
+
+    public static boolean hasVolume(Context c) {
+        return sp(c).contains("volume");
+    }
+
+    public static void setVolume(Context c, int v) {
+        sp(c).edit().putInt("volume", Math.max(0, Math.min(100, v))).apply();
+    }
+
     /** 设备上歌曲缓存上限，单位 MB，默认 1G */
     public static int cacheLimitMb(Context c) {
         return sp(c).getInt("cache_mb", 1024);

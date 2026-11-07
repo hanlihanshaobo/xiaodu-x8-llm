@@ -18,6 +18,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from .intent import cn_number
+
 try:
     from pypinyin import lazy_pinyin
 except Exception:  # 没装也能跑，只是不做同音字纠正
@@ -29,8 +31,15 @@ _STOP = ("暂停", "别放了", "停止播放", "停一下", "关掉音乐", "�
 _RESUME = ("继续放", "接着放", "继续播", "接着播", "继续", "接着")
 _NEXT = ("下一首", "换一首", "下一曲", "切歌")
 _PREV = ("上一首", "上一曲", "前一首")
-_VOL_UP = ("音量大", "声音大", "大声点", "大点声", "调大声")
-_VOL_DOWN = ("音量小", "声音小", "小声点", "小点声", "调小声")
+_VOL_UP = ("音量大", "声音大", "大声点", "大点声", "调大声", "音量调大", "声音调大", "放大声",
+           "声音太小", "音量太小", "太小声", "听不清")
+_VOL_DOWN = ("音量小", "声音小", "小声点", "小点声", "调小声", "音量调小", "声音调小", "放小声",
+             "声音太大", "音量太大", "太大声", "太吵")
+_VOL_SET = re.compile(
+    r"(?:音量|声音)[^0-9零〇一二三四五六七八九十百两]{0,6}"
+    r"(?:百分之)?\s*(\d{1,3}|[零〇一二三四五六七八九十百两]+)"
+    r"(?!\s*[点下些会])"
+)
 
 # 带这些词更像家居/播放控制，不要当歌名去搜
 _HOME_WORDS = (
@@ -91,10 +100,22 @@ class Music:
 
     # ---------- 触发判断 ----------
 
+    def _volume_value(self, query: str) -> int | None:
+        m = _VOL_SET.search(query or "")
+        if not m:
+            return None
+        value = cn_number(m.group(1))
+        if value is None:
+            return None
+        value = int(round(value))
+        return value if 0 <= value <= 100 else None
+
     def handles(self, query: str) -> bool:
         if not self.enabled:
             return False
         q = query.strip()
+        if self._volume_value(q) is not None:
+            return True
         if any(w in q for w in _STOP + _RESUME + _NEXT + _PREV + _VOL_UP + _VOL_DOWN):
             return True
         return bool(_PLAY.match(q))
@@ -102,6 +123,8 @@ class Music:
     def is_control(self, query: str) -> bool:
         """暂停/继续/切歌/音量这类确定性指令，仍然走本地，响应最快。"""
         q = (query or "").strip()
+        if self._volume_value(q) is not None:
+            return True
         return any(w in q for w in _STOP + _RESUME + _NEXT + _PREV + _VOL_UP + _VOL_DOWN)
 
     def has_song_name(self, query: str) -> bool:
@@ -357,6 +380,9 @@ class Music:
     async def handle(self, query: str) -> dict:
         q = query.strip()
         try:
+            v = self._volume_value(q)
+            if v is not None:
+                return {"cmd": "volume_set", "value": v, "say": f"音量调到{v}%了。"}
             if "暂停" in q:
                 return {"say": "好，暂停了。", "cmd": "pause"}
             if any(w in q for w in _STOP):

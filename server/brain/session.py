@@ -38,7 +38,7 @@ WAKE_ALIASES = {"小杜": "小度", "小渡": "小度", "小豆": "小度"}
 # 看起来像指令的词：只有这些才值得多花一次模型调用做意图解析
 _CMD_WORDS = (
     "开", "关", "调", "放", "听", "歌", "音乐", "暂停", "继续", "停",
-    "下一", "上一", "换", "切歌", "音量", "大声", "小声",
+    "下一", "上一", "换", "切歌", "音量", "声音", "大声", "小声",
     "灯", "空调", "加湿", "热水", "窗帘", "插座", "风扇", "温度", "亮度", "模式",
 )
 
@@ -644,6 +644,11 @@ class Session:
     async def _run_music(self, res: dict, query: str, display: str) -> None:
         """放歌与控歌。放歌后仍能听见唤醒词；播报时只闭麦到 TTS 结束。"""
         cmd = res.get("cmd")
+        if cmd == "volume_set":
+            value = max(0, min(100, int(res.get("value") or 50)))
+            await self.send({"type": "volume", "value": value})
+            await self._say(res.get("say") or f"音量调到{value}%了。")
+            return
         if cmd == "pause":
             await self.send({"type": "audio_pause"})
             await self._say(res.get("say") or "好，暂停了。")

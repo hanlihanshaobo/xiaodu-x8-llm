@@ -45,6 +45,7 @@ public class Player {
     // 等语音播完再开始的音乐
     private String[] pendingMusic;
     private boolean idleNotified = true;
+    private volatile float gain = 1f;
 
     public Player(Callback cb) {
         this.cb = cb;
@@ -204,6 +205,25 @@ public class Player {
         });
     }
 
+    /** 0~1 的 App 内增益，精确到百分比，不受系统音量档位限制 */
+    public void setGain(float value) {
+        final float v = Math.max(0f, Math.min(1f, value));
+        gain = v;
+        main.post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (musicMp != null) musicMp.setVolume(v, v);
+                } catch (Exception ignored) {
+                }
+                try {
+                    if (speechMp != null) speechMp.setVolume(v, v);
+                } catch (Exception ignored) {
+                }
+            }
+        });
+    }
+
     // ---------------- 音乐 ----------------
 
     private void startMusicIfReady() {
@@ -219,10 +239,18 @@ public class Player {
         try {
             MediaPlayer p = new MediaPlayer();
             p.setAudioStreamType(AudioManager.STREAM_MUSIC);
+            try {
+                p.setVolume(gain, gain);
+            } catch (Exception ignored) {
+            }
             p.setDataSource(item[1]);
             p.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
                 @Override
                 public void onPrepared(MediaPlayer player) {
+                    try {
+                        player.setVolume(gain, gain);
+                    } catch (Exception ignored) {
+                    }
                     if (speechMp != null || !speechQueue.isEmpty() || musicPausedByUser) {
                         // 语音正在播 / 用户暂停了：先停在准备好状态，稍后再 start
                         if (speechMp != null || !speechQueue.isEmpty()) musicPausedBySpeech = true;
@@ -315,11 +343,16 @@ public class Player {
         try {
             MediaPlayer p = new MediaPlayer();
             p.setAudioStreamType(AudioManager.STREAM_MUSIC);
+            try {
+                p.setVolume(gain, gain);
+            } catch (Exception ignored) {
+            }
             p.setDataSource(item[1]);
             p.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
                 @Override
                 public void onPrepared(MediaPlayer player) {
                     try {
+                        player.setVolume(gain, gain);
                         player.start();
                     } catch (Exception ignored) {
                     }

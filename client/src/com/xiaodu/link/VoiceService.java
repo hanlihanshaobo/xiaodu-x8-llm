@@ -109,6 +109,23 @@ public class VoiceService extends Service {
                 });
             }
         });
+        // 第一次升级到 App 内音量：把旧的系统音量换算成百分比，再把系统媒体音量拉满，
+        // 之后滑条/语音的 30% 就是真正的 30%，不会被系统 15 档量化成 28/33。
+        if (!Prefs.hasVolume(this)) {
+            try {
+                AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+                if (am != null) {
+                    int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                    int cur = am.getStreamVolume(AudioManager.STREAM_MUSIC);
+                    int pct = max > 0 ? Math.round(cur * 100f / max) : 100;
+                    Prefs.setVolume(this, pct);
+                    am.setStreamVolume(AudioManager.STREAM_MUSIC, max, 0);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        player.setGain(Prefs.volume(this) / 100f);
+        Bus.post("volume", String.valueOf(Prefs.volume(this)));
     }
 
     @Override
@@ -472,6 +489,13 @@ public class VoiceService extends Service {
         Bus.post("playing", "");
     }
 
+    /** 0~100 的 App 内音量，语音和滑条都走这里 */
+    public void setVolumePercent(int pct) {
+        pct = Math.max(0, Math.min(100, pct));
+        Prefs.setVolume(this, pct);
+        if (player != null) player.setGain(pct / 100f);
+    }
+
     // ---------------- 崩溃自诊断 ----------------
 
     private void installCrashHandler() {
@@ -584,20 +608,16 @@ public class VoiceService extends Service {
                     }
                 }
             } else if ("volume".equals(type)) {
-                try {
-                    AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
-                    if (am != null) {
-                        int dir = "up".equals(o.optString("dir"))
-                                ? AudioManager.ADJUST_RAISE : AudioManager.ADJUST_LOWER;
-                        am.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir,
-                                AudioManager.FLAG_SHOW_UI);
-                        int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-                        int cur = am.getStreamVolume(AudioManager.STREAM_MUSIC);
-                        int pct = max > 0 ? Math.round(cur * 100f / max) : 0;
-                        Bus.post("volume", String.valueOf(pct));
-                    }
-                } catch (Exception ignored) {
+                int pct;
+                if (o.has("value")) {
+                    pct = o.optInt("value", 50);
+                } else {
+                    int cur = Prefs.volume(this);
+                    pct = "up".equals(o.optString("dir")) ? cur + 10 : cur - 10;
                 }
+                pct = Math.max(0, Math.min(100, pct));
+                setVolumePercent(pct);
+                Bus.post("volume", String.valueOf(pct));
             } else if ("audio_pause".equals(type)) {
                 player.pauseMusic();
                 musicMode = false;
