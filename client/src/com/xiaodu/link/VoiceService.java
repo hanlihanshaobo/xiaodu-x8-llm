@@ -369,8 +369,15 @@ public class VoiceService extends Service {
                     songs.add(f);
                     total += f.length();
                 }
+                // 刚听过的歌不要删：上一首/再来一遍要直接用本地缓存
+                java.util.HashSet<String> recent = new java.util.HashSet<>();
+                synchronized (recentUrls) {
+                    for (String u : recentUrls) {
+                        recent.add(cacheName(u));
+                    }
+                }
                 if (total <= limit) return;
-                // 最久没用的先删，删到上限的 90%
+                // 最久没用的先删，刚播放过的跳过
                 songs.sort(new java.util.Comparator<java.io.File>() {
                     @Override
                     public int compare(java.io.File a, java.io.File b) {
@@ -379,6 +386,7 @@ public class VoiceService extends Service {
                 });
                 for (java.io.File f : songs) {
                     if (total <= limit * 9 / 10) break;
+                    if (recent.contains(f.getName())) continue;
                     long len = f.length();
                     if (f.delete()) total -= len;
                 }
@@ -401,6 +409,26 @@ public class VoiceService extends Service {
                 }
             }
         });
+    }
+
+    /** 最近播放过的 URL：清缓存时跳过，上一首直接命中本地 */
+    private final java.util.ArrayDeque<String> recentUrls = new java.util.ArrayDeque<>();
+
+    private void rememberRecent(String url) {
+        if (url == null || url.isEmpty()) return;
+        synchronized (recentUrls) {
+            recentUrls.remove(url);
+            recentUrls.addLast(url);
+            while (recentUrls.size() > 8) {
+                recentUrls.removeFirst();
+            }
+            // 顺手把文件时间刷新，两天过期的清理也不会删它
+            try {
+                java.io.File f = new java.io.File(getCacheDir(), cacheName(url));
+                if (f.exists()) f.setLastModified(System.currentTimeMillis());
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     /** 语音根本没播出来时，也要给服务端回执，清掉它的 pending */
@@ -595,6 +623,7 @@ public class VoiceService extends Service {
                 Bus.post("music", text);   // 先切界面
                 final String mid = o.optString("id");
                 final String murl = o.optString("url");
+                rememberRecent(murl);
                 final java.io.File f = new java.io.File(getCacheDir(), cacheName(murl));
                 if (f.exists() && f.length() > 100_000) {
                     player.enqueueMusic(mid, f.getAbsolutePath());   // 预加载命中，秒开
